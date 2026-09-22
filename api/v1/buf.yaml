@@ -1,0 +1,17 @@
+version: v2
+lint:
+  use:
+    - STANDARD
+  except:
+    # Directory layout api/v1/ is pinned by the plan's repo layout; renaming
+    # to pm0/v1/ is churn without value while the API is still v1.
+    - PACKAGE_DIRECTORY_MATCH
+    # Service is named Daemon (not DaemonService): the CLI/SDK surface reads
+    # v1.NewDaemonClient, matching pm2's "the daemon" vocabulary.
+    - SERVICE_SUFFIX
+    # Streaming responses use domain names (LogLine, UpdateDaemonEvent) —
+    # the event vocabulary reads better than synthetic Response suffixes.
+    - RPC_RESPONSE_STANDARD_NAME
+breaking:
+  use:
+    - FILE

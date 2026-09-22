@@ -1,0 +1,63 @@
+[
+  {
+    "step": "redacted-env",
+    "jlist": [
+      {
+        "monit": {
+          "cpu": 0,
+          "memory": 0
+        },
+        "name": "secretive",
+        "pid": 0,
+        "pm2_env": {
+          "args": [
+            "--exit-after",
+            "600000"
+          ],
+          "autorestart": true,
+          "created_at": 0,
+          "cron_restart": "",
+          "env": {
+            "AWS_SECRET_ACCESS_KEY": "[redacted]",
+            "PLAIN_TEXT": "visible"
+          },
+          "exec_interpreter": "none",
+          "exec_mode": "fork_mode",
+          "exit_code": null,
+          "exp_backoff_restart_delay": 0,
+          "instances": 1,
+          "interpreter": "none",
+          "interpreter_args": [],
+          "kill_signal": "SIGINT",
+          "kill_timeout": 1600,
+          "listen_timeout": 3000,
+          "log_date_format": "",
+          "max_memory_restart": 0,
+          "max_restarts": 16,
+          "merge_logs": false,
+          "min_uptime": 1000,
+          "name": "secretive",
+          "namespace": "default",
+          "node_args": [],
+          "pm_cwd": "golden",
+          "pm_err_log_path": "~/logs/secretive-error.log",
+          "pm_exec_path": "fakechild",
+          "pm_id": 0,
+          "pm_out_log_path": "~/logs/secretive-out.log",
+          "pm_pid_path": "~/pids/secretive-0.pid",
+          "pm_uptime": 0,
+          "restart_delay": 0,
+          "restart_time": 0,
+          "status": "online",
+          "stop_exit_codes": null,
+          "time": false,
+          "treekill": true,
+          "unstable_restarts": 0,
+          "wait_ready": false,
+          "watch": false
+        },
+        "pm_id": 0
+      }
+    ]
+  }
+]

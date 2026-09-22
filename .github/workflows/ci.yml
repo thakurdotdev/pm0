@@ -1,0 +1,76 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then echo "unformatted files:"; echo "$out"; exit 1; fi
+      - name: go vet
+        run: go vet ./...
+      - name: staticcheck
+        uses: dominikh/staticcheck-action@v1
+        with:
+          version: latest
+
+  test:
+    # Daily driver: unit tests + pgid fallback under -race.
+    # Cgroup-dependent tests auto-skip here (no delegated cgroup v2).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+      - name: race tests
+        run: go test -race -count=1 ./...
+
+  cgroup-v2-privileged:
+    # cgroup v2 delegated environment: exercises cgroup-kill and cgroup-freeze
+    # kill paths. Flaky infra is expected (plan risk #4); failure here does not
+    # block the build, but it must be loud.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    container:
+      image: ubuntu:24.04
+      options: --privileged
+      volumes:
+        - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+      - name: report cgroup topology
+        run: |
+          cat /proc/self/cgroup || true
+          mount | grep cgroup || true
+      - name: kill-path tests incl. cgroup
+        run: go test -race -count=1 -v ./internal/proc/...
+
+  golden-pm2:
+    # Compat contract assertions against REAL pm2 (docs/compat.md §2/§3).
+    # Non-blocking: pm2 is the reference implementation, drift here is loud
+    # but must not block pm2go development.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: install pm2
+        run: npm install -g pm2
+      - name: golden assertions vs real pm2
+        run: node scripts/golden-pm2-check.js pm2

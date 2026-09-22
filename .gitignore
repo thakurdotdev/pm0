@@ -1,0 +1,25 @@
+# binaries
+/pm0
+/cmd/pm0/pm0
+/test/fakechild/fakechild
+/bin/
+
+# test artifacts
+*.test
+*.out
+coverage.txt
+
+# daemon runtime dir (dev)
+/.pm0/
+
+# editor
+*.swp
+.idea/
+.vscode/
+bench/benchhelper/benchhelper
+bench/sleeper
+__pycache__/
+
+# npm/release artifacts
+/dist/
+/prebuilds/

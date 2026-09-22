@@ -1,0 +1,62 @@
+[
+  {
+    "step": "after-crash-loop",
+    "jlist": [
+      {
+        "monit": {
+          "cpu": 0,
+          "memory": 0
+        },
+        "name": "crasher",
+        "pid": 0,
+        "pm2_env": {
+          "args": [
+            "--exit-after",
+            "50",
+            "--exit-code",
+            "3"
+          ],
+          "autorestart": true,
+          "created_at": 0,
+          "cron_restart": "",
+          "env": "\u003cdaemon-env\u003e",
+          "exec_interpreter": "none",
+          "exec_mode": "fork_mode",
+          "exit_code": 3,
+          "exp_backoff_restart_delay": 0,
+          "instances": 1,
+          "interpreter": "none",
+          "interpreter_args": [],
+          "kill_signal": "SIGINT",
+          "kill_timeout": 1600,
+          "listen_timeout": 3000,
+          "log_date_format": "",
+          "max_memory_restart": 0,
+          "max_restarts": 2,
+          "merge_logs": false,
+          "min_uptime": 5000,
+          "name": "crasher",
+          "namespace": "default",
+          "node_args": [],
+          "pm_cwd": "golden",
+          "pm_err_log_path": "~/logs/crasher-error.log",
+          "pm_exec_path": "fakechild",
+          "pm_id": 0,
+          "pm_out_log_path": "~/logs/crasher-out.log",
+          "pm_pid_path": "~/pids/crasher-0.pid",
+          "pm_uptime": 0,
+          "restart_delay": 0,
+          "restart_time": 1,
+          "status": "errored",
+          "stop_exit_codes": null,
+          "time": false,
+          "treekill": true,
+          "unstable_restarts": 0,
+          "wait_ready": false,
+          "watch": false
+        },
+        "pm_id": 0
+      }
+    ]
+  }
+]

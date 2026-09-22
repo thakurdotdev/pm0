@@ -1,0 +1,49 @@
+{
+  "name": "pm0",
+  "version": "1.0.1",
+  "description": "PM2-compatible process supervisor written in Go — same workflow (start/status/logs/scale/reload), a fraction of the memory, 10-40x faster CLI",
+  "license": "MIT",
+  "bin": {
+    "pm0": "npm/pm0.js"
+  },
+  "scripts": {
+    "postinstall": "node npm/install.js"
+  },
+  "files": [
+    "npm/",
+    "cmd/",
+    "internal/",
+    "pkg/",
+    "api/",
+    "test/fakechild",
+    "prebuilds/",
+    "go.mod",
+    "go.sum",
+    "Makefile",
+    "LICENSE",
+    "README.md",
+    "install.sh",
+    "docs/"
+  ],
+  "keywords": [
+    "pm2",
+    "process-manager",
+    "supervisor",
+    "daemon",
+    "cluster",
+    "devops",
+    "procfile",
+    "pm0"
+  ],
+  "engines": {
+    "node": ">=14"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pm0/pm0.git"
+  },
+  "homepage": "https://github.com/pm0/pm0#readme",
+  "bugs": {
+    "url": "https://github.com/pm0/pm0/issues"
+  }
+}

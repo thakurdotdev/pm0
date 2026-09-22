@@ -1,0 +1,378 @@
+// pm0 daemon control-plane protocol.
+//
+// Transport: gRPC over a Unix domain socket at ~/.pm0/pm0.sock (0600).
+// This schema is the contract between the CLI, the Go SDK (pkg/client) and
+// the daemon. It is deliberately PM2-shaped where PM2
+// scripts depend on field names: see docs/compat.md for the JSON contract
+// (jlist keys, status vocabulary, defaults). Any field added here must keep
+// numbers assigned once and never reused (buf breaking checks enforce this).
+//
+// Version: v1. M0 pin. Extensions (metrics stream, monit feed, watch events,
+// health checks, cluster) land as additional RPCs/messages in later
+// milestones without breaking this file.
+syntax = "proto3";
+
+package pm0.v1;
+
+option go_package = "github.com/pm0/pm0/api/v1;v1";
+
+// Daemon is the control-plane service the daemon exposes on its UDS.
+service Daemon {
+  // Liveness + daemon metadata. Also the CLI's retry probe while the daemon
+  // is mid-update (in-place re-exec) — callers may receive an "updating"
+  // error until the new process has re-adopted apps.
+  rpc Ping(PingRequest) returns (PingResponse);
+
+  // --- process control ---------------------------------------------------
+
+  // Start one or more apps from a spec (fork mode in v1; N instances are
+  // named app-0..N-1 and do NOT share a port — see docs/compat.md).
+  rpc StartProcess(StartProcessRequest) returns (StartProcessResponse);
+
+  // Stop: graceful kill_signal, then force after kill_timeout. State stays
+  // registered (status stopped) until DeleteProcess.
+  rpc StopProcess(StopProcessRequest) returns (StopProcessResponse);
+
+  // Restart = stop (if running) + start, preserving pm_id and config.
+  rpc RestartProcess(RestartProcessRequest) returns (RestartProcessResponse);
+
+  // Delete = stop (if running) + forget. pm_id may be reused afterwards.
+  rpc DeleteProcess(DeleteProcessRequest) returns (DeleteProcessResponse);
+
+  // Reload: rolling restart, one instance at a time, health-gated (M5+).
+  // Pre-cluster this still yields semi-zero-downtime for N-instance apps.
+  rpc ReloadProcess(ReloadProcessRequest) returns (ReloadProcessResponse);
+
+  // Scale: adjust instance count of an app by +/-N (fork mode).
+  rpc ScaleProcess(ScaleProcessRequest) returns (ScaleProcessResponse);
+
+  // --- inspection ---------------------------------------------------------
+
+  // List all apps (backing for `pm0 list` and `pm0 jlist`).
+  rpc ListProcesses(ListProcessesRequest) returns (ListProcessesResponse);
+
+  // Describe one app in full (backing for `pm0 describe` / `pm0 show`).
+  rpc DescribeProcess(DescribeProcessRequest) returns (DescribeProcessResponse);
+
+  // StreamLogs tails app output. First response carries the backlog
+  // (ring buffer), then live lines follow. Server sends backlog only when
+  // include_backlog is set. Lines may carry drop markers
+  // ("[pm0: N lines dropped]") — never silent drops (invariant I8).
+  rpc StreamLogs(StreamLogsRequest) returns (stream LogLine);
+
+  // --- persistence ---------------------------------------------------------
+
+  // Save current app set to dump.json (atomic write, invariant I4).
+  rpc Save(SaveRequest) returns (SaveResponse);
+
+  // Resurrect: adopt apps from dump.json at daemon start.
+  rpc Resurrect(ResurrectRequest) returns (ResurrectResponse);
+
+  // --- daemon lifecycle ----------------------------------------------------
+
+  // UpdateDaemon: in-place re-exec (syscall.Exec, same PID). Children
+  // survive; the new process re-reads dump.json and re-adopts. The stream
+  // reports "re-execing" just before the exec; the CLI then polls Ping.
+  rpc UpdateDaemon(UpdateDaemonRequest) returns (stream UpdateDaemonEvent);
+
+  // KillDaemon: stop all apps, unlink socket, exit. Children are stopped
+  // first (invariant I1); `kill --force` skips stopping.
+  rpc KillDaemon(KillDaemonRequest) returns (KillDaemonResponse);
+}
+
+// --- common -------------------------------------------------------------
+
+// Selector targets one or more apps. CLI grammar:
+//   <name> | <name1> <name2> | <pm_id> | all
+// If multiple fields are set, they are OR-ed; empty selector with
+// require_explicit=false means all.
+message Selector {
+  repeated string names = 1;
+  repeated int32 pm_ids = 2;
+  bool all = 3;
+}
+
+// ProcessStatus mirrors PM2's status vocabulary exactly — these strings are
+// load-bearing for scripts that parse jlist (docs/compat.md).
+enum ProcessStatus {
+  PROCESS_STATUS_UNSPECIFIED = 0;
+  PROCESS_STATUS_LAUNCHING = 1; // "launching"
+  PROCESS_STATUS_ONLINE = 2;    // "online"
+  PROCESS_STATUS_STOPPED = 3;   // "stopped" (intentional stop or never started)
+  PROCESS_STATUS_STOPPING = 4;  // "stopping"
+  PROCESS_STATUS_WAITING = 5;   // "waiting restart" (inside restart_delay / backoff) — observed pm2 string
+  PROCESS_STATUS_ERRORED = 6;   // "errored" (crash-loop exhausted max_restarts)
+}
+
+// --- daemon metadata -----------------------------------------------------
+
+message PingRequest {}
+
+message PingResponse {
+  string version = 1;
+  string commit = 2;
+  int32 pid = 3;
+  // Effective kill-path mode: "cgroup-kill" | "cgroup-freeze" | "pgid".
+  string kill_mode = 4;
+  string kernel_release = 5;
+  // Non-empty when cgroup accounting/enforcement is degraded (e.g. "memory
+  // controller not delegated; accounting only"). Mirrors what doctor prints.
+  string cgroup_warning = 6;
+}
+
+// --- start ----------------------------------------------------------------
+
+message ProcessSpec {
+  string name = 1;
+  string script = 2; // path to script/binary (pm_exec_path)
+  repeated string args = 3;
+  // "" = auto-detect (shebang/extension), "none" = exec script directly,
+  // otherwise interpreter binary path (node, python, ...).
+  string interpreter = 4;
+  repeated string interpreter_args = 5;
+  string cwd = 6;
+  map<string, string> env = 7;
+  int32 instances = 8; // 1 = single fork; N = app-0..N-1 (no shared port)
+  string exec_mode = 9; // "fork" (only mode in v1) | "cluster" (M6)
+  bool autorestart = 10;
+  string kill_signal = 11; // default "SIGINT" (PM2 compat)
+  int32 kill_timeout_ms = 12; // default 1600 (PM2 compat)
+  int32 max_restarts = 13; // default 16 (PM2 compat)
+  int64 min_uptime_ms = 14; // default 1000 (PM2 compat)
+  int64 max_memory_restart_bytes = 15; // 0 = disabled
+  string cron_restart = 16; // cron expression, empty = none
+  bool watch = 17;
+  // M2 schema correction: pm2's actual option is exp_backoff_restart_delay
+  // (a number of ms, source: pm2 lib/API/schema.json), not a boolean flag.
+  // 0 = off; when set, first backoff sleep = this value, later sleeps grow
+  // x1.5 capped at 15000ms (observed pm2 God.handleExit).
+  int64 exp_backoff_restart_delay_ms = 18; // opt-in exponential backoff (0 = off)
+  bool wait_ready = 19; // sd_notify / ready-line gating (M5)
+  int32 listen_timeout_ms = 20;
+  // --- M2 additions (numbers assigned once, never reused) ----------------
+  int64 restart_delay_ms = 21; // default 0 = immediate restart (row 13)
+  string namespace = 22; // default "default" (row 8)
+  bool treekill = 23; // accepted; v1 always tree-kills (row 23 divergence)
+  bool time = 24; // timestamps in logs (row 24)
+  string log_date_format = 25; // row 25; empty = no timestamps
+  string out_file = 26; // rows 26-28: explicit sinks; empty = ~/.pm0 paths
+  string error_file = 27;
+  string pid_file = 28;
+  bool merge_logs = 29; // row 29: stderr into out file
+  // Exit codes treated as intentional stops: the app parks stopped and is
+  // NOT restarted (observed pm2 stop_exit_codes option).
+  repeated int32 stop_exit_codes = 30;
+  // --- M4 additions: built-in rotation knobs (divergence 12 config surface,
+  // pm0 extension; NOT echoed in pm2_env) --------------------------------
+  // Proto3 cannot distinguish "unset 0" from "explicit 0", and 0 means
+  // "rotation off" in config memory — so the wire encodes three states:
+  // 0 = default (10 MiB), -1 = rotation off, >0 = max bytes per sink before
+  // copytruncate rotation.
+  int64 log_rotate_max_bytes = 31;
+  // 0 = default (30 rotated copies retained); >0 = cap.
+  int32 log_rotate_retain = 32;
+  // --- M5 additions: health checks (divergence 7, pm0 extension; NOT
+  // echoed in pm2_env). Cmd empty = off; 0 intervals lift to the pinned
+  // defaults (30s / 5s / 3) at the daemon boundary, like the dump encoding.
+  string health_check_cmd = 33; // run via /bin/sh -c while the app is online
+  int64 health_check_interval_ms = 34; // 0 = default 30000
+  int64 health_check_timeout_ms = 35;  // 0 = default 5000 (clamped to interval)
+  int32 health_check_retries = 36;     // 0 = default 3 consecutive failures
+}
+
+message StartProcessRequest {
+  repeated ProcessSpec specs = 1;
+}
+
+message StartProcessResponse {
+  repeated ProcessInfo processes = 1;
+}
+
+// --- stop / restart / delete / reload / scale ------------------------------
+
+message StopProcessRequest {
+  Selector selector = 1;
+}
+
+message StopProcessResponse {
+  repeated int32 affected_pm_ids = 1;
+}
+
+message RestartProcessRequest {
+  Selector selector = 1;
+  // Restart with an updated spec (env, args...). "pm0 restart app --update-env".
+  ProcessSpec updated_spec = 2;
+}
+
+message RestartProcessResponse {
+  repeated int32 affected_pm_ids = 1;
+}
+
+message DeleteProcessRequest {
+  Selector selector = 1;
+}
+
+message DeleteProcessResponse {
+  repeated int32 affected_pm_ids = 1;
+}
+
+message ReloadProcessRequest {
+  Selector selector = 1;
+}
+
+message ReloadProcessResponse {
+  repeated int32 affected_pm_ids = 1;
+}
+
+message ScaleProcessRequest {
+  string name = 1;
+  int32 delta = 2; // e.g. +2 or -1
+}
+
+message ScaleProcessResponse {
+  repeated int32 affected_pm_ids = 1;
+}
+
+// --- inspection -------------------------------------------------------------
+
+message ListProcessesRequest {}
+
+message ListProcessesResponse {
+  repeated ProcessInfo processes = 1;
+}
+
+message DescribeProcessRequest {
+  Selector selector = 1; // must resolve to exactly one app
+}
+
+message DescribeProcessResponse {
+  ProcessInfo process = 1;
+}
+
+message StreamLogsRequest {
+  Selector selector = 1;
+  int32 lines = 2; // backlog size (ring buffer), 0 = live only
+  bool include_stderr = 3; // CLI --err
+  bool raw = 4; // no prefix
+  bool follow = 5; // false: send backlog and close
+}
+
+message LogLine {
+  int32 pm_id = 1;
+  string name = 2;
+  Stream stream = 3;
+  bytes data = 4;
+  int64 timestamp_ms = 5; // 0 = timestamps disabled (PM2 default: off)
+
+  enum Stream {
+    STREAM_UNSPECIFIED = 0;
+    STREAM_STDOUT = 1;
+    STREAM_STDERR = 2;
+  }
+}
+
+// --- persistence --------------------------------------------------------------
+
+message SaveRequest {}
+
+message SaveResponse {
+  string dump_path = 1; // ~/.pm0/dump.json
+  int32 saved_count = 2;
+}
+
+message ResurrectRequest {}
+
+message ResurrectResponse {
+  int32 started_count = 1;
+  int32 errored_count = 2; // missing binary etc. — never aborts the batch
+}
+
+// --- daemon lifecycle ------------------------------------------------------------
+
+message UpdateDaemonRequest {}
+
+message UpdateDaemonEvent {
+  string stage = 1; // "saving" | "re-execing"
+}
+
+message KillDaemonRequest {
+  bool force = 1; // true: do not stop apps first
+}
+
+message KillDaemonResponse {}
+
+// --- process model -----------------------------------------------------------------
+
+// Monit carries the `monit` object of jlist. memory is RSS of the process
+// tree (cgroup memory.stat anon or per-proc RSS sum) — NOT memory.current,
+// which page cache inflates vs pm2 (docs/compat.md).
+message Monit {
+  int64 memory = 1; // bytes
+  double cpu = 2; // percent of one core
+}
+
+// ProcessEnv mirrors the pm2_env object of jlist. PM2 dumps the full child
+// environment in env — a known secrets exposure kept for compat; the daemon
+// supports --redact-env (docs/compat.md).
+message ProcessEnv {
+  string name = 1;
+  string namespace = 2;
+  int32 pm_id = 3;
+  string pm_exec_path = 4; // resolved script
+  repeated string args = 5;
+  string pm_cwd = 6;
+  string pm_out_log_path = 7;
+  string pm_err_log_path = 8;
+  string pm_pid_path = 9;
+  string interpreter = 10;
+  repeated string interpreter_args = 11;
+  string exec_mode = 12; // "fork" | "cluster"
+  int32 instances = 13;
+  string kill_signal = 14;
+  int32 kill_timeout_ms = 15;
+  bool autorestart = 16;
+  int32 max_restarts = 17;
+  int64 min_uptime_ms = 18;
+  int64 max_memory_restart_bytes = 19;
+  int32 restart_time = 20; // successful restart counter
+  int32 unstable_restarts = 21;
+  int64 created_at = 22; // epoch ms
+  int64 pm_uptime = 23; // epoch ms of last start
+  int32 exit_code = 24; // last exit code
+  bool wait_ready = 25;
+  int32 listen_timeout_ms = 26;
+  string cron_restart = 27;
+  bool watch = 28;
+  bool exp_backoff_restart_time = 29;
+  map<string, string> env = 30;
+  // --- M2 additions -------------------------------------------------------
+  bool treekill = 31; // always true in v1 (row 23 divergence)
+  bool time = 32; // timestamps flag echo (row 24)
+  bool merge_logs = 33; // row 29
+  string log_date_format = 34; // row 25
+  // §2.2: exit_code is JSON null while running / on signal deaths. proto3
+  // int32 cannot be null, so presence rides alongside (false => render null).
+  bool exit_code_present = 35;
+  int64 restart_delay_ms = 36; // row 13 echo
+  // created_at is JSON null after a crash-loop parks the app errored
+  // (observed pm2 sets created_at = null there); presence rides alongside.
+  bool created_at_present = 37;
+  int64 exp_backoff_restart_delay_ms = 38; // observed pm2 option echo
+  repeated int32 stop_exit_codes = 39; // observed pm2 option echo
+}
+
+// ProcessInfo mirrors the top-level jlist entry. The M2 JSON layer renders
+// { pid, pm_id, name, monit, pm2_env } with exact PM2 key names; this message
+// is the typed backing store, not the wire-JSON shape itself.
+message ProcessInfo {
+  int32 pm_id = 1;
+  string name = 2;
+  int32 pid = 3; // 0 when not running
+  ProcessStatus status = 4;
+  Monit monit = 5;
+  ProcessEnv pm2_env = 6;
+  // pm0 extension (divergence 6, M5): "oom" when the last death was a
+  // kernel OOM kill (wait status SIGKILL + cgroup memory.events oom_kill
+  // advance), "" otherwise. Additive observability; describe-only.
+  string exit_reason = 7;
+}
