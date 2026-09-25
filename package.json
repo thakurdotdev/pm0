@@ -40,10 +40,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/pm0/pm0.git"
+    "url": "git+https://github.com/thakurdotdev/pm0.git"
   },
-  "homepage": "https://github.com/pm0/pm0#readme",
+  "homepage": "https://github.com/thakurdotdev/pm0#readme",
   "bugs": {
-    "url": "https://github.com/pm0/pm0/issues"
+    "url": "https://github.com/thakurdotdev/pm0/issues"
   }
 }

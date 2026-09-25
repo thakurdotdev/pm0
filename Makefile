@@ -43,29 +43,28 @@ release:
           os=$${plat%/*}; arch=$${plat#*/}; \
           echo "== $${os}/$${arch}"; \
           CGO_ENABLED=0 GOOS=$${os} GOARCH=$${arch} GOARM=$$([ "$${arch}" = arm ] && echo 7) \
-            $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST)/pm0-$${os}-$${arch}$( [ "$${os}" = windows ] && echo .exe ) ./cmd/pm0 || exit 1; \
+            $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST)/pm0-$${os}-$${arch} ./cmd/pm0 || exit 1; \
 	done
 	@for plat in $(PLATFORMS); do \
           os=$${plat%/*}; arch=$${plat#*/}; \
           stem=pm0-$(VERSION)-$${os}-$${arch}; \
-          cp $(DIST)/pm0-$${os}-$${arch}$( [ "$${os}" = windows ] && echo .exe ) $(DIST)/$${stem}$( [ "$${os}" = windows ] && echo .exe ); \
-          if [ "$${os}" = windows ]; then \
-            (cd $(DIST) && zip -q $${stem}.zip $${stem}.exe); rm -f $(DIST)/$${stem}.exe; \
-          else \
-            tar -C $(DIST) -czf $(DIST)/$${stem}.tar.gz pm0-$${os}-$${arch}; rm -f $(DIST)/pm0-$${os}-$${arch}; \
-          fi; \
+          cp $(DIST)/pm0-$${os}-$${arch} $(DIST)/$${stem}; \
+          tar -C $(DIST) -czf $(DIST)/$${stem}.tar.gz pm0-$${os}-$${arch}; \
+          cp $(DIST)/$${stem}.tar.gz $(DIST)/pm0-$${os}-$${arch}.tar.gz; \
 	done
+	@cd $(DIST) && sha256sum * > checksums.txt 2>/dev/null || true
 	@echo "release archives in $(DIST)/ (version $(VERSION))"
 
 # npm-prebuilds: stage a prebuild for THIS platform where the npm shim looks
 npm-prebuilds: build
 	@os=$$($(GO) env GOOS); arch=$$($(GO) env GOARCH); \
 	mkdir -p prebuilds/$${os}-$${arch} && \
-	cp bin/$(BINARY) prebuilds/$${os}-$${arch}/$(BINARY)$$([ "$${os}" = windows ] && echo .exe) && \
+	cp bin/$(BINARY) prebuilds/$${os}-$${arch}/$(BINARY) && \
 	echo "staged prebuilds/$${os}-$${arch}/"
 
 # npm-pack: stage the prebuild and produce dist/pm0-<version>.tgz
 npm-pack: npm-prebuilds
+	mkdir -p $(DIST)
 	npm pack --pack-destination $(DIST)
 	@echo "npm tarball: $(DIST)/pm0-$(VERSION).tgz"
 

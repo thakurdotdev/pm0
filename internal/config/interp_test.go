@@ -142,4 +142,3 @@ func TestWithResolvedExecPathBinary(t *testing.T) {
 		t.Errorf("script = %q, want %q", resolved.Script, shBin)
 	}
 }
-

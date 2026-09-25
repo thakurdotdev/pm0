@@ -111,7 +111,7 @@ const build = spawnSync(
 
 if (build.error || build.status !== 0) {
   process.stderr.write(build.stderr || String(build.error) + "\n");
-  process.stderr.write(`pm0: source build failed — see the steps above or ` + `https://github.com/pm0/pm0#install\n`);
+  process.stderr.write(`pm0: source build failed — see the steps above or ` + `https://github.com/thakurdotdev/pm0#install\n`);
   process.exit(1);
 }
 

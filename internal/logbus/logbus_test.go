@@ -461,4 +461,3 @@ func TestRouteClear(t *testing.T) {
 		t.Fatalf("expected 0 lines after Clear, got %d", len(r.BacklogAll(true)))
 	}
 }
-

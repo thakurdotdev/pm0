@@ -1,17 +1,17 @@
 #!/bin/sh
 # pm0 quick installer.
 #
-#   curl -fsSL https://raw.githubusercontent.com/pm0/pm0/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/thakurdotdev/pm0/main/install.sh | bash
 #
 # Resolution order:
-#   1. download a release tarball from GitHub (PM0_VERSION / PM0_REPO override)
+#   1. download a release tarball or binary from GitHub (PM0_VERSION / PM0_REPO override)
 #   2. build from a local source checkout (this script's directory, or PM0_SRC)
 #
 # Install target: PM0_INSTALL_DIR, else /usr/local/bin when writable (or root),
 # else ~/.local/bin.
 set -eu
 
-PM0_REPO="${PM0_REPO:-github.com/pm0/pm0}"
+PM0_REPO="${PM0_REPO:-github.com/thakurdotdev/pm0}"
 PM0_VERSION="${PM0_VERSION:-latest}"
 INSTALL_DIR="${PM0_INSTALL_DIR:-}"
 
@@ -62,12 +62,26 @@ trap 'rm -rf "$tmp"' EXIT
 
 # 1) release download
 if command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1; then
-  if fetch "https://$PM0_REPO/releases/latest/download/pm0-$os-$arch.tar.gz" "$tmp/pm0.tar.gz" 2>/dev/null; then
+  if [ "$PM0_VERSION" = "latest" ]; then
+    base_url="https://$PM0_REPO/releases/latest/download"
+  else
+    base_url="https://$PM0_REPO/releases/download/$PM0_VERSION"
+  fi
+
+  # Try unversioned and versioned tarballs, then standalone binary
+  if fetch "$base_url/pm0-$os-$arch.tar.gz" "$tmp/pm0.tar.gz" 2>/dev/null; then
     tar -C "$tmp" -xzf "$tmp/pm0.tar.gz"
     install_binary "$tmp/pm0-$os-$arch"
     exit 0
+  elif [ "$PM0_VERSION" != "latest" ] && fetch "$base_url/pm0-$PM0_VERSION-$os-$arch.tar.gz" "$tmp/pm0.tar.gz" 2>/dev/null; then
+    tar -C "$tmp" -xzf "$tmp/pm0.tar.gz"
+    install_binary "$tmp/pm0-$os-$arch"
+    exit 0
+  elif fetch "$base_url/pm0-$os-$arch" "$tmp/pm0-bin" 2>/dev/null; then
+    install_binary "$tmp/pm0-bin"
+    exit 0
   fi
-  say "no downloadable release for $os/$arch yet — trying a source build"
+  say "no downloadable release for $os/$arch ($PM0_VERSION) yet — trying a source build"
 fi
 
 # 2) source build

@@ -278,4 +278,3 @@ func TestEcosystemScriptResolutionPathBinary(t *testing.T) {
 		t.Fatalf("script = %q, want %q", apps[0].App.Script, shBin)
 	}
 }
-
