@@ -458,6 +458,8 @@ func cmdLogs(args []string) {
 	if err != nil {
 		fatalf("logs: %v", err)
 	}
+	colorOutput := isColorTerm()
+	maxTagLen := 0 // tracks widest "id|name" seen so far for alignment
 	emit := func(line *v1.LogLine) {
 		if *errOnly && line.GetStream() != v1.LogLine_STREAM_STDERR {
 			return
@@ -465,15 +467,33 @@ func cmdLogs(args []string) {
 		prefix := ""
 		if !*raw {
 			name := line.GetName()
-			if line.GetStream() == v1.LogLine_STREAM_STDERR {
-				name += "-err"
-			} else {
-				name += "-out"
+			tag := fmt.Sprintf("%d|%s", line.GetPmId(), name)
+			if len(tag) > maxTagLen {
+				maxTagLen = len(tag)
 			}
-			prefix = name + " | "
+			padded := tag + strings.Repeat(" ", maxTagLen-len(tag))
+			isErr := line.GetStream() == v1.LogLine_STREAM_STDERR
+			if colorOutput {
+				if isErr {
+					prefix = fmt.Sprintf("\033[31m%s\033[0m \033[90m│\033[0m ", padded)
+				} else {
+					prefix = fmt.Sprintf("\033[36m%s\033[0m \033[90m│\033[0m ", padded)
+				}
+			} else {
+				if isErr {
+					prefix = padded + " │ "
+				} else {
+					prefix = padded + " │ "
+				}
+			}
 		}
 		if *timestamp {
-			prefix = time.Now().Format("2006-01-02T15:04:05 ") + prefix
+			ts := time.Now().Format("15:04:05")
+			if colorOutput {
+				prefix = fmt.Sprintf("\033[90m%s\033[0m %s", ts, prefix)
+			} else {
+				prefix = ts + " " + prefix
+			}
 		}
 		fmt.Printf("%s%s\n", prefix, string(line.GetData()))
 	}
@@ -764,4 +784,13 @@ func mustSize(s string) int64 {
 		fatalf("%v", err)
 	}
 	return v
+}
+
+// isColorTerm reports whether stdout is a color-capable terminal.
+func isColorTerm() bool {
+	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
+		return false
+	}
+	fi, err := os.Stdout.Stat()
+	return err == nil && (fi.Mode()&os.ModeCharDevice) != 0
 }

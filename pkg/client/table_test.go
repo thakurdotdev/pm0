@@ -122,8 +122,8 @@ func TestWriteListTable(t *testing.T) {
 	}
 
 	// 4. Must contain summary metrics
-	if !strings.Contains(out, "pm0") {
-		t.Errorf("expected pm0 in summary, got:\n%s", out)
+	if !strings.Contains(out, "processes") {
+		t.Errorf("expected processes label in summary, got:\n%s", out)
 	}
 	if !strings.Contains(out, "1 online") {
 		t.Errorf("expected online count in summary, got:\n%s", out)
@@ -138,8 +138,8 @@ func TestWriteListTableEmpty(t *testing.T) {
 	if !strings.Contains(out, "No processes managed by pm0") {
 		t.Errorf("expected empty message, got:\n%s", out)
 	}
-	if !strings.Contains(out, "0 active") && !strings.Contains(out, "0 processes") {
-		t.Errorf("expected 0 active/processes, got:\n%s", out)
+	if !strings.Contains(out, "0 processes") {
+		t.Errorf("expected 0 processes, got:\n%s", out)
 	}
 }
 
