@@ -106,7 +106,7 @@ func TestWriteListTable(t *testing.T) {
 	}
 
 	// 2. Must contain headers in pm0 order
-	headers := []string{"id", "app", "status", "port", "pid", "uptime", "↺", "cpu", "mem"}
+	headers := []string{"id", "app", "mode", "status", "port", "pid", "uptime", "↺", "cpu", "mem"}
 	for _, h := range headers {
 		if !strings.Contains(out, h) {
 			t.Errorf("expected header %q in output, got:\n%s", h, out)

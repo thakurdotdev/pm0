@@ -30,11 +30,12 @@ const (
 func WriteListTable(w io.Writer, ps []*v1.ProcessInfo) {
 	color := isTerminal(w)
 
-	// pm0 column layout: id, app, status, port, pid, uptime, ↺, cpu, mem
-	hdr := []string{"id", "app", "status", "port", "pid", "uptime", "↺", "cpu", "mem"}
+	// pm0 column layout: id, app, mode, status, port, pid, uptime, ↺, cpu, mem
+	hdr := []string{"id", "app", "mode", "status", "port", "pid", "uptime", "↺", "cpu", "mem"}
 	aligns := []alignment{
 		alignRight, // id
 		alignLeft,  // app
+		alignLeft,  // mode
 		alignLeft,  // status
 		alignLeft,  // port
 		alignRight, // pid
@@ -46,7 +47,6 @@ func WriteListTable(w io.Writer, ps []*v1.ProcessInfo) {
 
 	portsByPid := detectAppPorts(ps)
 
-	rawRows := make([][]string, 0, len(ps))
 	displayRows := make([][]string, 0, len(ps))
 
 	for _, p := range ps {
@@ -56,41 +56,89 @@ func WriteListTable(w io.Writer, ps []*v1.ProcessInfo) {
 			stDisp = colorStatus(stRaw)
 		}
 
+		modeRaw := "fork"
+		if p.GetPm2Env().GetExecMode() == "cluster" || p.GetPm2Env().GetExecMode() == "cluster_mode" {
+			modeRaw = "cluster"
+		}
+		modeDisp := modeRaw
+		if color {
+			if modeRaw == "cluster" {
+				modeDisp = "\033[36mcluster\033[0m"
+			} else {
+				modeDisp = "\033[90mfork\033[0m"
+			}
+		}
+
 		leaderPid := int(p.GetPid())
 		ports := portsByPid[leaderPid]
 		portRaw, portDisp := formatPorts(ports, color)
 
+		restarts := p.GetPm2Env().GetRestartTime()
+		restartRaw := fmt.Sprint(restarts)
+		restartDisp := restartRaw
+		if color {
+			if restarts == 0 {
+				restartDisp = fmt.Sprintf("\033[90m%d\033[0m", restarts)
+			} else if restarts >= 10 {
+				restartDisp = fmt.Sprintf("\033[1;31m%d\033[0m", restarts)
+			} else {
+				restartDisp = fmt.Sprintf("\033[1;33m%d\033[0m", restarts)
+			}
+		}
+
+		cpuVal := p.GetMonit().GetCpu()
+		cpuRaw := fmt.Sprintf("%.1f%%", cpuVal)
+		cpuDisp := cpuRaw
+		if color {
+			if cpuVal == 0.0 {
+				cpuDisp = fmt.Sprintf("\033[90m%.1f%%\033[0m", cpuVal)
+			} else if cpuVal >= 80.0 {
+				cpuDisp = fmt.Sprintf("\033[1;31m%.1f%%\033[0m", cpuVal)
+			} else if cpuVal >= 50.0 {
+				cpuDisp = fmt.Sprintf("\033[33m%.1f%%\033[0m", cpuVal)
+			}
+		}
+
+		memVal := p.GetMonit().GetMemory()
+		memRaw := memString(memVal)
+		memDisp := memRaw
+		if color {
+			if memVal >= 1024*1024*1024 {
+				memDisp = fmt.Sprintf("\033[1;33m%s\033[0m", memRaw)
+			}
+		}
+
 		rawRow := []string{
 			fmt.Sprint(p.GetPmId()),
 			p.GetName(),
+			modeRaw,
 			stRaw,
 			portRaw,
 			pidString(p),
 			uptimeString(p.GetPm2Env().GetPmUptime(), stRaw),
-			fmt.Sprint(p.GetPm2Env().GetRestartTime()),
-			fmt.Sprintf("%.1f%%", p.GetMonit().GetCpu()),
-			memString(p.GetMonit().GetMemory()),
+			restartRaw,
+			cpuRaw,
+			memRaw,
 		}
 
 		dispRow := []string{
 			rawRow[0],
 			rawRow[1],
+			modeDisp,
 			stDisp,
 			portDisp,
-			rawRow[4],
 			rawRow[5],
 			rawRow[6],
-			rawRow[7],
-			rawRow[8],
+			restartDisp,
+			cpuDisp,
+			memDisp,
 		}
 
-		rawRows = append(rawRows, rawRow)
 		displayRows = append(displayRows, dispRow)
 	}
 
 	if len(ps) == 0 {
 		printEmptyTable(w, color)
-		printUsageSummary(w, ps, color)
 		return
 	}
 
@@ -106,6 +154,12 @@ func WriteListTable(w io.Writer, ps []*v1.ProcessInfo) {
 		}
 	}
 
+	totalWidth := 0
+	for _, wCol := range widths {
+		totalWidth += wCol + 3
+	}
+	tableWidth := totalWidth - 1
+
 	// 1. Top border: ┌─────┬─────┐
 	printBorder(w, "┌", "┬", "┐", widths, color)
 
@@ -120,11 +174,11 @@ func WriteListTable(w io.Writer, ps []*v1.ProcessInfo) {
 		printTableRow(w, r, widths, aligns, false, color)
 	}
 
-	// 5. Bottom border: └─────┴─────┘
-	printBorder(w, "└", "┴", "┘", widths, color)
+	// 5. Table-to-footer divider: ├─────┴─────┤
+	printBorder(w, "├", "┴", "┤", widths, color)
 
-	// 6. Overall system & process usage metrics
-	printUsageSummary(w, ps, color)
+	// 6. Integrated footer panel matching exact table width + closing border
+	printUsageSummary(w, ps, tableWidth, color)
 }
 
 func formatPorts(ports []int, color bool) (raw string, disp string) {
@@ -151,17 +205,21 @@ func formatPorts(ports []int, color bool) (raw string, disp string) {
 }
 
 func printEmptyTable(w io.Writer, color bool) {
-	msg := "No processes managed by pm0"
-	width := len(msg) + 4
+	width := 80
 	bColor := ""
 	reset := ""
 	if color {
 		bColor = "\033[90m"
 		reset = "\033[0m"
 	}
+	msg := "No processes managed by pm0"
+	padLeft := (width - len(msg)) / 2
+	padRight := width - len(msg) - padLeft
+
 	fmt.Fprintf(w, "%s┌%s┐%s\n", bColor, strings.Repeat("─", width), reset)
-	fmt.Fprintf(w, "%s│%s  %s  %s│%s\n", bColor, reset, msg, bColor, reset)
-	fmt.Fprintf(w, "%s└%s┘%s\n", bColor, strings.Repeat("─", width), reset)
+	fmt.Fprintf(w, "%s│%s%s%s%s%s│%s\n", bColor, reset, strings.Repeat(" ", padLeft), msg, strings.Repeat(" ", padRight), bColor, reset)
+	fmt.Fprintf(w, "%s├%s┤%s\n", bColor, strings.Repeat("─", width), reset)
+	printUsageSummary(w, nil, width, color)
 }
 
 func printBorder(w io.Writer, left, mid, right string, widths []int, color bool) {
@@ -219,7 +277,7 @@ func printTableRow(w io.Writer, cells []string, widths []int, aligns []alignment
 	fmt.Fprintln(w, b.String())
 }
 
-func printUsageSummary(w io.Writer, ps []*v1.ProcessInfo, color bool) {
+func printUsageSummary(w io.Writer, ps []*v1.ProcessInfo, tableWidth int, color bool) {
 	var totalMemory int64
 	var totalCPU float64
 	onlineCount := 0
@@ -241,30 +299,18 @@ func printUsageSummary(w io.Writer, ps []*v1.ProcessInfo, color bool) {
 
 	sys := readSystemStats()
 
-	fmt.Fprintln(w)
-
-	// Build the summary rows as key-value pairs for a clean table
-	type summaryRow struct {
-		label string
-		value string
-		// display versions (with ANSI colors) when color=true
-		labelDisp string
-		valueDisp string
-	}
-
-	var rows []summaryRow
-
-	// Row 1: Process summary
-	var statusVal, statusDisp string
+	// 1. Process summary
+	var procDisp string
 	if len(ps) == 0 {
-		statusVal = "0 processes"
-		statusDisp = statusVal
 		if color {
-			statusDisp = "\033[90m0 processes\033[0m"
+			procDisp = "\033[90mprocesses:\033[0m \033[90m0 processes\033[0m"
+		} else {
+			procDisp = "processes: 0 processes"
 		}
 	} else {
-		parts := []string{fmt.Sprintf("%d online", onlineCount)}
-		dispParts := []string{}
+		var parts []string
+		var dispParts []string
+		parts = append(parts, fmt.Sprintf("%d online", onlineCount))
 		if color {
 			dispParts = append(dispParts, fmt.Sprintf("\033[1;32m%d online\033[0m", onlineCount))
 		}
@@ -280,116 +326,161 @@ func printUsageSummary(w io.Writer, ps []*v1.ProcessInfo, color bool) {
 				dispParts = append(dispParts, fmt.Sprintf("\033[33m%d stopped\033[0m", stoppedCount))
 			}
 		}
-		statusVal = strings.Join(parts, ", ")
+
 		if color {
-			statusDisp = strings.Join(dispParts, "\033[90m, \033[0m")
+			procDisp = "\033[90mprocesses:\033[0m " + strings.Join(dispParts, "\033[90m, \033[0m")
 		} else {
-			statusDisp = statusVal
+			procDisp = "processes: " + strings.Join(parts, ", ")
 		}
 	}
 
-	rows = append(rows, summaryRow{
-		label: "processes", labelDisp: "processes",
-		value: statusVal, valueDisp: statusDisp,
-	})
-
-	rows = append(rows, summaryRow{
-		label: "app cpu", labelDisp: "app cpu",
-		value:     fmt.Sprintf("%.1f%%", totalCPU),
-		valueDisp: fmt.Sprintf("%.1f%%", totalCPU),
-	})
-
-	rows = append(rows, summaryRow{
-		label: "app memory", labelDisp: "app memory",
-		value:     memString(totalMemory),
-		valueDisp: memString(totalMemory),
-	})
-
-	// Row 2: Host info
-	if sys.HasLoad {
-		loadVal := fmt.Sprintf("%d cores  (load: %.2f, %.2f, %.2f)", sys.CPUCores, sys.Load1, sys.Load5, sys.Load15)
-		loadDisp := loadVal
-		if color {
-			loadDisp = fmt.Sprintf("%d cores  \033[90m(load: %.2f, %.2f, %.2f)\033[0m", sys.CPUCores, sys.Load1, sys.Load5, sys.Load15)
+	// 2. App usage (CPU & Mem)
+	cpuRaw := fmt.Sprintf("%.1f%% cpu", totalCPU)
+	cpuDisp := cpuRaw
+	if color {
+		if totalCPU == 0.0 {
+			cpuDisp = fmt.Sprintf("\033[90m%.1f%% cpu\033[0m", totalCPU)
+		} else if totalCPU >= 80.0 {
+			cpuDisp = fmt.Sprintf("\033[1;31m%.1f%% cpu\033[0m", totalCPU)
+		} else if totalCPU >= 50.0 {
+			cpuDisp = fmt.Sprintf("\033[33m%.1f%% cpu\033[0m", totalCPU)
 		}
-		rows = append(rows, summaryRow{
-			label: "host cpu", labelDisp: "host cpu",
-			value: loadVal, valueDisp: loadDisp,
-		})
+	}
+
+	memRaw := memString(totalMemory) + " mem"
+	memDisp := memRaw
+	if color && totalMemory >= 1024*1024*1024 {
+		memDisp = fmt.Sprintf("\033[1;33m%s\033[0m", memRaw)
+	}
+
+	var appDisp string
+	if color {
+		appDisp = fmt.Sprintf("\033[90mapp usage:\033[0m %s\033[90m, \033[0m%s", cpuDisp, memDisp)
 	} else {
-		rows = append(rows, summaryRow{
-			label: "host cpu", labelDisp: "host cpu",
-			value:     fmt.Sprintf("%d cores", sys.CPUCores),
-			valueDisp: fmt.Sprintf("%d cores", sys.CPUCores),
-		})
+		appDisp = fmt.Sprintf("app usage: %s, %s", cpuRaw, memRaw)
 	}
 
+	// 3. Host CPU & Load
+	var hostCPUDisp string
+	if sys.HasLoad {
+		if color {
+			hostCPUDisp = fmt.Sprintf("\033[90mhost cpu:\033[0m %d cores \033[90m(load: %.2f, %.2f, %.2f)\033[0m", sys.CPUCores, sys.Load1, sys.Load5, sys.Load15)
+		} else {
+			hostCPUDisp = fmt.Sprintf("host cpu: %d cores (load: %.2f, %.2f, %.2f)", sys.CPUCores, sys.Load1, sys.Load5, sys.Load15)
+		}
+	} else {
+		if color {
+			hostCPUDisp = fmt.Sprintf("\033[90mhost cpu:\033[0m %d cores", sys.CPUCores)
+		} else {
+			hostCPUDisp = fmt.Sprintf("host cpu: %d cores", sys.CPUCores)
+		}
+	}
+
+	// 4. Host RAM with mini gauge
+	var hostMemDisp string
 	if sys.HasMem {
-		memVal := fmt.Sprintf("%s / %s (%.1f%%)", formatMemBytes(sys.UsedMem), formatMemBytes(sys.TotalMem), sys.MemUsedPct)
-		memDisp := memVal
-		if color {
-			pctColor := "\033[1m"
-			if sys.MemUsedPct > 90 {
-				pctColor = "\033[1;31m"
-			} else if sys.MemUsedPct > 75 {
-				pctColor = "\033[33m"
-			}
-			memDisp = fmt.Sprintf("\033[1m%s\033[0m / %s %s(%.1f%%)\033[0m",
-				formatMemBytes(sys.UsedMem), formatMemBytes(sys.TotalMem), pctColor, sys.MemUsedPct)
+		gaugeRaw, gaugeDisp := renderMiniGauge(sys.MemUsedPct, color)
+		var memDetail string
+		if tableWidth >= 85 {
+			memDetail = fmt.Sprintf("%.1f%% (%s / %s)", sys.MemUsedPct, formatMemBytes(sys.UsedMem), formatMemBytes(sys.TotalMem))
+		} else {
+			memDetail = fmt.Sprintf("%.1f%% (%s/%s)", sys.MemUsedPct, formatMemBytes(sys.UsedMem), formatMemBytes(sys.TotalMem))
 		}
-		rows = append(rows, summaryRow{
-			label: "host memory", labelDisp: "host memory",
-			value: memVal, valueDisp: memDisp,
-		})
-	}
 
-	// Calculate column widths
-	labelWidth := 0
-	valueWidth := 0
-	for _, r := range rows {
-		if len(r.label) > labelWidth {
-			labelWidth = len(r.label)
+		if color {
+			hostMemDisp = fmt.Sprintf("\033[90mhost mem:\033[0m %s %s", gaugeDisp, memDetail)
+		} else {
+			hostMemDisp = fmt.Sprintf("host mem: %s %s", gaugeRaw, memDetail)
 		}
-		vl := visibleLen(r.valueDisp)
-		if vl > valueWidth {
-			valueWidth = vl
+	} else {
+		if color {
+			hostMemDisp = "\033[90mhost mem: -\033[0m"
+		} else {
+			hostMemDisp = "host mem: -"
 		}
 	}
 
-	widths := []int{labelWidth, valueWidth}
+	// Render footer lines inside the unified box
+	printFooterLine(w, procDisp, hostCPUDisp, tableWidth, color)
+	printFooterLine(w, appDisp, hostMemDisp, tableWidth, color)
 
-	// Render as a bordered table
-	printBorder(w, "┌", "┬", "┐", widths, color)
-	for i, r := range rows {
-		lbl := r.labelDisp
-		val := r.valueDisp
-		if color {
-			lbl = "\033[1;37m" + r.label + "\033[0m"
-		}
-		lblPad := labelWidth - len(r.label)
-		valPad := valueWidth - visibleLen(val)
-		if lblPad < 0 {
-			lblPad = 0
-		}
-		if valPad < 0 {
-			valPad = 0
-		}
-
-		bDiv := "│"
-		if color {
-			bDiv = "\033[90m│\033[0m"
-		}
-
-		fmt.Fprintf(w, "%s %s%s %s %s%s %s\n",
-			bDiv, lbl, strings.Repeat(" ", lblPad), bDiv,
-			val, strings.Repeat(" ", valPad), bDiv)
-
-		// Separator between app and host sections
-		if i == 2 && len(rows) > 3 {
-			printBorder(w, "├", "┼", "┤", widths, color)
-		}
+	// Bottom border: └─────────────┘
+	bColor := ""
+	reset := ""
+	if color {
+		bColor = "\033[90m"
+		reset = "\033[0m"
 	}
-	printBorder(w, "└", "┴", "┘", widths, color)
+	fmt.Fprintf(w, "%s└%s┘%s\n", bColor, strings.Repeat("─", tableWidth), reset)
+}
+
+func printFooterLine(w io.Writer, leftDisp, rightDisp string, tableWidth int, color bool) {
+	bDiv := "│"
+	if color {
+		bDiv = "\033[90m│\033[0m"
+	}
+
+	leftLen := visibleLen(leftDisp)
+	rightLen := visibleLen(rightDisp)
+
+	// Side-by-side with 2 spaces margin
+	needed := leftLen + rightLen + 4
+	if needed <= tableWidth {
+		pad := tableWidth - 4 - leftLen - rightLen
+		fmt.Fprintf(w, "%s  %s%s%s  %s\n", bDiv, leftDisp, strings.Repeat(" ", pad), rightDisp, bDiv)
+		return
+	}
+
+	// Side-by-side with 1 space margin
+	if leftLen+rightLen+2 <= tableWidth {
+		pad := tableWidth - 2 - leftLen - rightLen
+		fmt.Fprintf(w, "%s %s%s%s %s\n", bDiv, leftDisp, strings.Repeat(" ", pad), rightDisp, bDiv)
+		return
+	}
+
+	// If narrow terminal, stack vertically within the box with 2 spaces margin
+	padLeft := tableWidth - 4 - leftLen
+	if padLeft < 0 {
+		padLeft = 0
+	}
+	fmt.Fprintf(w, "%s  %s%s  %s\n", bDiv, leftDisp, strings.Repeat(" ", padLeft), bDiv)
+
+	padRight := tableWidth - 4 - rightLen
+	if padRight < 0 {
+		padRight = 0
+	}
+	fmt.Fprintf(w, "%s  %s%s  %s\n", bDiv, rightDisp, strings.Repeat(" ", padRight), bDiv)
+}
+
+func renderMiniGauge(pct float64, color bool) (string, string) {
+	const totalBlocks = 10
+	filled := int((pct + 5.0) / 10.0)
+	if filled < 0 {
+		filled = 0
+	}
+	if filled > totalBlocks {
+		filled = totalBlocks
+	}
+	empty := totalBlocks - filled
+
+	raw := fmt.Sprintf("[%s%s]", strings.Repeat("■", filled), strings.Repeat("□", empty))
+	if !color {
+		return raw, raw
+	}
+
+	gaugeColor := "\033[32m" // green
+	if pct >= 90.0 {
+		gaugeColor = "\033[1;31m" // bright red
+	} else if pct >= 75.0 {
+		gaugeColor = "\033[33m" // yellow
+	}
+
+	disp := fmt.Sprintf("\033[90m[\033[0m%s%s\033[90m%s]\033[0m",
+		gaugeColor,
+		strings.Repeat("■", filled),
+		strings.Repeat("□", empty),
+	)
+	return raw, disp
 }
 
 func colorStatus(status string) string {

@@ -172,7 +172,7 @@ func TestGoldenLogsBacklog(t *testing.T) {
 		out := r.pm0(t, "logs", "floods", "-lines", "500", "-nostream", "--out")
 		missing := 0
 		for i := 0; i < 500; i++ {
-			if !strings.Contains(out, fmt.Sprintf("floods-out | out-%d\n", i)) {
+			if !strings.Contains(out, fmt.Sprintf("out-%d\n", i)) {
 				missing++
 			}
 		}

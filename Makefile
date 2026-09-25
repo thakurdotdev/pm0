@@ -44,13 +44,7 @@ release:
           echo "== $${os}/$${arch}"; \
           CGO_ENABLED=0 GOOS=$${os} GOARCH=$${arch} GOARM=$$([ "$${arch}" = arm ] && echo 7) \
             $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST)/pm0-$${os}-$${arch} ./cmd/pm0 || exit 1; \
-	done
-	@for plat in $(PLATFORMS); do \
-          os=$${plat%/*}; arch=$${plat#*/}; \
-          stem=pm0-$(VERSION)-$${os}-$${arch}; \
-          cp $(DIST)/pm0-$${os}-$${arch} $(DIST)/$${stem}; \
-          tar -C $(DIST) -czf $(DIST)/$${stem}.tar.gz pm0-$${os}-$${arch}; \
-          cp $(DIST)/$${stem}.tar.gz $(DIST)/pm0-$${os}-$${arch}.tar.gz; \
+          tar -C $(DIST) -czf $(DIST)/pm0-$${os}-$${arch}.tar.gz pm0-$${os}-$${arch}; \
 	done
 	@cd $(DIST) && sha256sum * > checksums.txt 2>/dev/null || true
 	@echo "release archives in $(DIST)/ (version $(VERSION))"

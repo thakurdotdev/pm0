@@ -33,6 +33,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: "go.mod"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "23"
       - name: race tests
         run: go test -race -count=1 ./...
 
@@ -49,6 +52,8 @@ jobs:
         - /sys/fs/cgroup:/sys/fs/cgroup:rw
     steps:
       - uses: actions/checkout@v4
+      - name: install build dependencies
+        run: apt-get update && apt-get install -y gcc libc6-dev
       - uses: actions/setup-go@v5
         with:
           go-version-file: "go.mod"
