@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	v1 "github.com/pm0/pm0/api/v1"
+	"github.com/pm0/pm0/internal/cluster"
 	"github.com/pm0/pm0/internal/config"
 	"github.com/pm0/pm0/internal/proc"
 	"github.com/pm0/pm0/internal/store"
@@ -39,6 +40,15 @@ func (s *Server) StartProcess(ctx context.Context, req *v1.StartProcessRequest) 
 			return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("start %s: %v", cfg.Name, err))
 		}
 		cfg = resolved
+
+		// Fail fast on old Node: without reusePort support the first
+		// instance binds and every later one EADDRINUSEs (confusing
+		// partial success). Nothing is registered on this error.
+		if cfg.ExecMode == "cluster" {
+			if err := cluster.CheckNodeVersion(cfg.ExecPath); err != nil {
+				return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("start %s: %v", cfg.Name, err))
+			}
+		}
 
 		var cfgs []config.App
 		if cfg.Instances == 1 {
@@ -219,6 +229,11 @@ func (s *Server) ScaleProcess(ctx context.Context, req *v1.ScaleProcessRequest) 
 				if v.Config.Instance > maxIdx {
 					maxIdx = v.Config.Instance
 				}
+			}
+			// Same fail-fast as start: scaling past 1 on old Node would
+			// just EADDRINUSE the new instances.
+			if err := cluster.CheckNodeVersion(base.ExecPath); err != nil {
+				return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("scale %s: %v", name, err))
 			}
 		}
 		cfgs := make([]config.App, 0, delta)

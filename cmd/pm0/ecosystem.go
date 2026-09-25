@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	v1 "github.com/pm0/pm0/api/v1"
 	"github.com/pm0/pm0/internal/config"
@@ -72,7 +73,11 @@ func cmdStartEcosystem(path, only, envSelect string, extraEnv map[string]string)
 		if want != nil && !want[ea.App.Name] {
 			continue
 		}
-		specs = append(specs, specFromEcosystemApp(ea, envSelect, extraEnv, callerCwd))
+		sp := specFromEcosystemApp(ea, envSelect, extraEnv, callerCwd)
+		if sp.GetInstances() > 1 && sp.GetExecMode() != "cluster" && !looksLikeNode(sp.GetScript(), sp.GetInterpreter()) {
+			fmt.Fprintf(os.Stderr, "[pm0] warning: %s: instances=%d with a non-node app stays fork-mode (no shared port; cluster is Node.js-only)\n", sp.GetName(), sp.GetInstances())
+		}
+		specs = append(specs, sp)
 	}
 	if want != nil && len(specs) == 0 {
 		fatalf("start: --only %q matched none of the ecosystem apps", only)
@@ -82,6 +87,7 @@ func cmdStartEcosystem(path, only, envSelect string, extraEnv map[string]string)
 	}
 
 	c := mustDial()
+	opStart := time.Now()
 
 	listResp, _ := c.List()
 	existingByName := make(map[string]*v1.ProcessInfo)
@@ -119,11 +125,15 @@ func cmdStartEcosystem(path, only, envSelect string, extraEnv map[string]string)
 			fmt.Fprintf(os.Stderr, "pm0: %v\n", err)
 			if resp != nil {
 				printStarted(resp)
+				renderFreshList(c)
+				fmt.Printf("[pm0] start failed in %s\n", formatElapsed(time.Since(opStart)))
 			}
 			os.Exit(1)
 		}
 		printStarted(resp)
 	}
+	renderFreshList(c)
+	fmt.Printf("[pm0] start done in %s\n", formatElapsed(time.Since(opStart)))
 }
 
 // specFromEcosystemApp maps a parsed ecosystem app onto the wire spec.

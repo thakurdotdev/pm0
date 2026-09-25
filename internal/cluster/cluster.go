@@ -19,9 +19,15 @@
 package cluster
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
 )
 
 // PreloadName is the preload file inside PM0_HOME.
@@ -103,4 +109,90 @@ func WritePreload(home string) (string, error) {
 		return "", fmt.Errorf("cluster: write preload: %w", err)
 	}
 	return path, nil
+}
+
+// versionCache memoizes node --version probes by binary string: cluster
+// starts must not pay a process spawn per instance (ecosystem @500 apps).
+var versionCache sync.Map // string -> string (normalized "x.y.z")
+
+// CheckNodeVersion fails fast when the resolved node binary is older than
+// MinNodeVersion (no reusePort support: the second instance would
+// EADDRINUSE after the first one already bound). Callers surface this as
+// InvalidArgument before registering anything.
+func CheckNodeVersion(bin string) error {
+	if bin == "" {
+		bin = "node"
+	}
+	if v, ok := versionCache.Load(bin); ok {
+		return checkVersionString(v.(string), bin)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "--version").Output()
+	if err != nil {
+		return fmt.Errorf("cluster: exec_mode cluster requires node >= %s: cannot probe %q (--version): %v",
+			MinNodeVersion, bin, err)
+	}
+	ver := strings.TrimSpace(string(out))
+	versionCache.Store(bin, ver)
+	return checkVersionString(ver, bin)
+}
+
+func checkVersionString(ver, bin string) error {
+	maj, min, patch, err := parseVersion(ver)
+	if err != nil {
+		return fmt.Errorf("cluster: exec_mode cluster requires node >= %s: cannot parse version %q from %q",
+			MinNodeVersion, ver, bin)
+	}
+	wmaj, wmin, wpatch, _ := parseVersion(MinNodeVersion)
+	if compareVersion(maj, min, patch, wmaj, wmin, wpatch) < 0 {
+		return fmt.Errorf("cluster: exec_mode cluster requires node >= %s (SO_REUSEPORT reusePort support), got %s from %q",
+			MinNodeVersion, ver, bin)
+	}
+	return nil
+}
+
+func parseVersion(s string) (int, int, int, error) {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "v")
+	s = strings.TrimPrefix(s, "V")
+	// Strip pre-release/build metadata ("23.2.0-nightly...").
+	if i := strings.IndexAny(s, "-+"); i >= 0 {
+		s = s[:i]
+	}
+	parts := strings.Split(s, ".")
+	if len(parts) < 2 {
+		return 0, 0, 0, fmt.Errorf("bad version %q", s)
+	}
+	nums := make([]int, 3)
+	for i := 0; i < 3 && i < len(parts); i++ {
+		n, err := strconv.Atoi(strings.TrimSpace(parts[i]))
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("bad version %q", s)
+		}
+		nums[i] = n
+	}
+	return nums[0], nums[1], nums[2], nil
+}
+
+func compareVersion(aMaj, aMin, aPatch, bMaj, bMin, bPatch int) int {
+	if aMaj != bMaj {
+		if aMaj < bMaj {
+			return -1
+		}
+		return 1
+	}
+	if aMin != bMin {
+		if aMin < bMin {
+			return -1
+		}
+		return 1
+	}
+	if aPatch != bPatch {
+		if aPatch < bPatch {
+			return -1
+		}
+		return 1
+	}
+	return 0
 }

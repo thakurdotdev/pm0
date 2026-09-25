@@ -25,7 +25,7 @@ $ pm0 reload api                 # rolling zero-downtime reload
 - **Standalone Daemon**: Single static Go binary; does not require Node.js for the supervisor daemon.
 - **Multi-Runtime Support**: Native execution for Node, Bun, Deno, Python, and compiled binaries.
 - **Process Reliability**: Built on Linux cgroup v2 kill paths to guarantee zero orphaned child processes.
-- **Zero-Downtime Cluster Mode**: Kernel `SO_REUSEPORT` socket pooling for rolling updates without dropped connections.
+- **Zero-Downtime Cluster Mode (Node.js only)**: Kernel `SO_REUSEPORT` socket pooling for rolling updates without dropped connections (Node ≥ 23.2; other runtimes stay fork-mode).
 - **Built-in Log Rotation**: Memory-bounded ring buffers with automatic size-based rotation.
 
 ---
@@ -114,7 +114,7 @@ pm0 startup                          # Install systemd service for auto-boot
 |---|---|---|---|
 | `--name` | `-n` | Assign an application name | `--name api` |
 | `--interpreter` | | Specify runtime binary (`bun`, `deno`, `none`) | `--interpreter bun` |
-| `--instances` | `-i` | Number of cluster instances (`N` or `max`) | `-i max` |
+| `--instances` | `-i` | Number of instances (`N` or `max`; Node.js apps share one port via cluster mode, other runtimes run as fork families with no shared port) | `-i max` |
 | `--watch` | | Auto-restart on file changes in current directory | `--watch` |
 | `--max-memory-restart` | | Auto-restart if memory exceeds limit | `--max-memory-restart 500M` |
 | `--env` | | Inject environment variable | `--env PORT=3000` |

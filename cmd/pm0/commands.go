@@ -164,6 +164,12 @@ func cmdStart(args []string) {
 	if mode == "" && instCount > 0 && looksLikeNode(script, *interpreter) {
 		mode = "cluster"
 	}
+	if instCount > 1 && mode != "cluster" && !looksLikeNode(script, *interpreter) {
+		// Cluster is Node.js-only (SO_REUSEPORT preload patches
+		// net.Server.listen): non-node -i stays a fork family with no
+		// shared port, so say so instead of letting binds collide.
+		fmt.Fprintf(os.Stderr, "[pm0] warning: -i %d with a non-node app stays fork-mode (no shared port; cluster is Node.js-only)\n", instCount)
+	}
 
 	spec := &v1.ProcessSpec{
 		Name:                     *name,
@@ -221,6 +227,7 @@ func cmdStart(args []string) {
 	}
 
 	c := mustDial()
+	opStart := time.Now()
 	resp, err := c.Start([]*v1.ProcessSpec{spec})
 	if err != nil {
 		// The daemon may still have registered (parked errored) — print
@@ -228,10 +235,14 @@ func cmdStart(args []string) {
 		fmt.Fprintf(os.Stderr, "pm0: %v\n", err)
 		if resp != nil {
 			printStarted(resp)
+			renderFreshList(c)
+			fmt.Printf("[pm0] start failed in %s\n", formatElapsed(time.Since(opStart)))
 		}
 		os.Exit(1)
 	}
 	printStarted(resp)
+	renderFreshList(c)
+	fmt.Printf("[pm0] start done in %s\n", formatElapsed(time.Since(opStart)))
 }
 
 func printStarted(resp *v1.StartProcessResponse) {
@@ -271,6 +282,7 @@ func cmdSelector(args []string, kind string) {
 	// reload / delete reject it at Parse as an unknown flag already.
 	c := mustDial()
 	sel := selector(targets)
+	opStart := time.Now()
 	var err error
 	switch kind {
 	case "stop":
@@ -289,7 +301,9 @@ func cmdSelector(args []string, kind string) {
 	if err != nil {
 		fatalf("%s: %v", kind, err)
 	}
-	fmt.Printf("[pm0] %s done\n", kind)
+	elapsed := time.Since(opStart)
+	renderFreshList(c)
+	fmt.Printf("[pm0] %s done in %s\n", kind, formatElapsed(elapsed))
 }
 
 // looksLikeNode is the CLI-side heuristic for `-i` mode selection: node
@@ -358,14 +372,19 @@ func cmdScale(args []string) {
 		delta = target - current
 		if delta == 0 {
 			fmt.Printf("[pm0] %s already has %d instance(s)\n", name, current)
+			renderFreshList(c0)
 			return
 		}
 	}
 	c := mustDial()
+	opStart := time.Now()
 	if _, err := c.Scale(name, int32(delta)); err != nil {
 		fatalf("scale: %v", err)
 	}
+	elapsed := time.Since(opStart)
 	fmt.Printf("[pm0] scaled %s by %+d\n", name, delta)
+	renderFreshList(c)
+	fmt.Printf("[pm0] scale done in %s\n", formatElapsed(elapsed))
 }
 
 // isForkInstanceName reports whether app is named <base>-<digits> (the
@@ -648,11 +667,15 @@ func cmdResurrect(args []string) {
 		os.Exit(2)
 	}
 	c := mustDial()
+	opStart := time.Now()
 	resp, err := c.Resurrect()
 	if err != nil {
 		fatalf("resurrect: %v", err)
 	}
+	elapsed := time.Since(opStart)
 	fmt.Printf("[pm0] resurrected %d app(s), %d errored\n", resp.GetStartedCount(), resp.GetErroredCount())
+	renderFreshList(c)
+	fmt.Printf("[pm0] resurrect done in %s\n", formatElapsed(elapsed))
 }
 
 // cmdUpdate implements `pm0 update`: in-place re-exec, then wait for
@@ -713,6 +736,39 @@ func cmdPing(args []string) {
 }
 
 // --- helpers -------------------------------------------------------------
+
+// renderFreshList fetches the current process set and prints the same
+// table as `pm0 list` (pm2 parity: mutating commands show the table).
+// A List failure never masks the mutation itself — it warns on stderr.
+func renderFreshList(c *client.Client) {
+	resp, err := c.List()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "pm0: list: %v\n", err)
+		return
+	}
+	client.WriteListTable(os.Stdout, resp.GetProcesses())
+}
+
+// formatElapsed renders op timing humanized: ms below 1s, s below 1m,
+// m+s above (e.g. 42ms, 1.2s, 2m3.0s).
+func formatElapsed(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	if d < time.Millisecond {
+		return fmt.Sprintf("%dµs", d.Microseconds())
+	}
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	secs := float64(d) / float64(time.Second)
+	if secs < 60 {
+		return fmt.Sprintf("%.1fs", secs)
+	}
+	m := int(secs) / 60
+	s := secs - float64(m*60)
+	return fmt.Sprintf("%dm%.1fs", m, s)
+}
 
 func mustDial() *client.Client {
 	c, err := dialDaemon()
