@@ -3,9 +3,12 @@
 [![CI](https://github.com/thakurdotdev/pm0/actions/workflows/ci.yml/badge.svg)](https://github.com/thakurdotdev/pm0/actions/workflows/ci.yml)
 [![Release](https://github.com/thakurdotdev/pm0/actions/workflows/release.yml/badge.svg)](https://github.com/thakurdotdev/pm0/actions/workflows/release.yml)
 [![GitHub Release](https://img.shields.io/github/v/release/thakurdotdev/pm0)](https://github.com/thakurdotdev/pm0/releases)
+[![Website](https://img.shields.io/badge/website-pm0.thakur.dev-blue)](https://pm0.thakur.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A fast, lightweight, PM2-compatible process supervisor written in Go. Same workflow and commands as PM2 (`start`, `status`, `logs`, `scale`, `reload`, `ecosystem`), a fraction of the memory footprint, and native support for any runtime (Node.js, Bun, Deno, Python, Go, Rust, and shell scripts).
+
+Documentation & Benchmarks: [pm0.thakur.dev](https://pm0.thakur.dev)
 
 ```text
 $ pm0 start api.js -i max        # cluster mode, one port, N workers
@@ -38,10 +41,10 @@ Detects architecture (`amd64`, `arm64`, `arm`, `386`) and installs the binary:
 
 ```sh
 # User install (installs to ~/.local/bin)
-curl -fsSL https://raw.githubusercontent.com/thakurdotdev/pm0/main/install.sh | bash
+curl -fsSL https://pm0.thakur.dev/install.sh | bash
 
 # System-wide install (installs to /usr/local/bin)
-curl -fsSL https://raw.githubusercontent.com/thakurdotdev/pm0/main/install.sh | sudo bash
+curl -fsSL https://pm0.thakur.dev/install.sh | sudo bash
 ```
 
 > If installing without `sudo`, ensure `~/.local/bin` is in your `$PATH` (e.g., `export PATH="$HOME/.local/bin:$PATH"` in `~/.bashrc`).

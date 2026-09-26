@@ -1,10 +1,10 @@
 #!/bin/sh
 # pm0 installer
 #
-#   curl -fsSL https://raw.githubusercontent.com/thakurdotdev/pm0/main/install.sh | bash
+#   curl -fsSL https://pm0.thakur.dev/install.sh | bash
 #
 # System-wide install:
-#   curl -fsSL https://raw.githubusercontent.com/thakurdotdev/pm0/main/install.sh | sudo bash
+#   curl -fsSL https://pm0.thakur.dev/install.sh | sudo bash
 #
 # Environment overrides:
 #   PM0_VERSION      version tag to install (default: latest)

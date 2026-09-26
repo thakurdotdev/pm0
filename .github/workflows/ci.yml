@@ -3,7 +3,36 @@ name: ci
 on:
   push:
     branches: [main]
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "package.json"
+      - "Makefile"
+      - "api/**"
+      - "cmd/**"
+      - "internal/**"
+      - "pkg/**"
+      - "test/**"
+      - "scripts/**"
+      - "npm/**"
+      - ".github/workflows/ci.yml"
   pull_request:
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "package.json"
+      - "Makefile"
+      - "api/**"
+      - "cmd/**"
+      - "internal/**"
+      - "pkg/**"
+      - "test/**"
+      - "scripts/**"
+      - "npm/**"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch:
 
 jobs:
   lint:
