@@ -1,6 +1,6 @@
 {
   "name": "pm0",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "PM2-compatible process supervisor written in Go — same workflow (start/status/logs/scale/reload), a fraction of the memory, 10-40x faster CLI",
   "license": "MIT",
   "bin": {

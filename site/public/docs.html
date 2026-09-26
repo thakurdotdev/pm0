@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>pm0 Documentation — Install, CLI, Flags, and Ecosystem</title>
+<meta name="description" content="Official documentation for pm0: one-line installation, commands reference, CLI flags, ecosystem.config.js compatibility, and systemd persistence.">
+<link rel="canonical" href="https://pm0.thakur.dev/docs">
+<meta name="robots" content="index,follow">
+<meta name="theme-color" content="#000000">
+
+<!-- OpenGraph / Twitter -->
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="pm0">
+<meta property="og:title" content="pm0 Documentation — Install, CLI, and Ecosystem">
+<meta property="og:description" content="Complete reference for pm0: drop-in PM2 replacement with 77% less memory.">
+<meta property="og:url" content="https://pm0.thakur.dev/docs">
+<meta name="twitter:card" content="summary_large_image">
+
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/pm0.css?v=20260926e">
+
+<style>
+button { font-family: inherit; font-size: inherit; line-height: inherit; border: none; background: none; color: inherit; cursor: pointer; padding: 0; margin: 0; appearance: none; -webkit-appearance: none; }
+.brand-wrap { display: inline-flex !important; align-items: center !important; gap: 10px !important; }
+</style>
+</head>
+<body>
+<!-- Ambient Background -->
+<div class="bg-ambient">
+  <div class="bg-spotlight"></div>
+  <div class="bg-grid"></div>
+</div>
+
+<!-- Header (Wensity Style) -->
+<header class="nav">
+  <div class="wrap nav-inner">
+    <div class="brand-wrap">
+      <a class="brand" href="/" aria-label="pm0 home">
+        <span class="brand-mark">0</span>
+        <span>pm0</span>
+      </a>
+      <span class="brand-badge">Docs</span>
+    </div>
+
+    <nav class="nav-links" aria-label="Main Navigation">
+      <a class="nav-link" href="/">Home</a>
+      <a class="nav-link" href="/#features">Features</a>
+      <a class="nav-link" href="/#benchmarks">Benchmarks</a>
+      <a class="nav-link active" href="/docs">Docs</a>
+    </nav>
+
+    <div class="nav-actions">
+      <a class="btn btn-secondary btn-sm" href="https://github.com/thakurdotdev/pm0" target="_blank" rel="noopener">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2A10 10 0 0 0 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.1-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0 0 12 2z"/></svg>
+        GitHub
+      </a>
+      <a class="btn btn-red btn-sm" href="/">
+        Landing Page ↗
+      </a>
+    </div>
+  </div>
+</header>
+
+<main class="wrap docs-layout-wensity">
+  <!-- Left Collapsible Sidebar (Wensity Screenshot 1) -->
+  <aside class="docs-left-sidebar" aria-label="Documentation Navigation">
+    <div style="margin-bottom: 24px">
+      <div class="docs-group-header">
+        <span>Getting Started</span>
+        <span>▾</span>
+      </div>
+      <a class="docs-item-link active" href="#installation">Installation &amp; Setup</a>
+      <a class="docs-item-link" href="#the-short-path">The Short Path</a>
+      <a class="docs-item-link" href="#quickstart">Quick Start</a>
+    </div>
+
+    <div style="margin-bottom: 24px">
+      <div class="docs-group-header">
+        <span>CLI &amp; Architecture</span>
+        <span>▾</span>
+      </div>
+      <a class="docs-item-link" href="#commands">Commands Reference</a>
+      <a class="docs-item-link" href="#flags">CLI Flags</a>
+      <a class="docs-item-link" href="#cluster">Cluster Mode</a>
+    </div>
+
+    <div style="margin-bottom: 24px">
+      <div class="docs-group-header">
+        <span>Configuration &amp; Ops</span>
+        <span>▾</span>
+      </div>
+      <a class="docs-item-link" href="#ecosystem">Ecosystem File</a>
+      <a class="docs-item-link" href="#persistence">Systemd &amp; Persistence</a>
+      <a class="docs-item-link" href="#requirements">System Requirements</a>
+      <a class="docs-item-link" href="#faq">Frequently Asked Questions</a>
+    </div>
+  </aside>
+
+  <!-- Center Content -->
+  <article class="docs-main-content">
+    <div style="margin-bottom:36px">
+      <div class="eyebrow">Documentation</div>
+      <h1>pm0 Reference Guide</h1>
+      <p style="color:var(--text-muted);font-size:16px;margin:0">
+        Everything you need to install, configure, and operate pm0 in development and high-load production environments.
+      </p>
+    </div>
+
+    <!-- Merged Installation & Short Path (Clean, Spacious, No Bloat) -->
+    <section id="installation" style="margin-bottom: 48px">
+      <h2 id="the-short-path" style="margin-top:0;padding-top:0;border-top:none">Installation &amp; The Short Path</h2>
+      <p>Install pm0 with a single shell command and deploy your first high-throughput supervised cluster in under 60 seconds.</p>
+
+      <!-- The 4-Step Production Flow (Clean Full-Width Steps with Copy Buttons) -->
+      <div class="docs-steps-flow">
+        <!-- Step 1: Install with Interactive Method Selector -->
+        <div class="docs-step-row">
+          <div class="docs-step-title-wrap">
+            <div class="docs-step-heading-group">
+              <span class="step-num-pill">01</span>
+              <h3 class="docs-step-heading">Download &amp; Install</h3>
+            </div>
+            <div class="docs-inst-tabs" role="tablist">
+              <button type="button" class="docs-inst-tab active" data-inst="curl-user">User (curl)</button>
+              <button type="button" class="docs-inst-tab" data-inst="curl-root">System (sudo)</button>
+              <button type="button" class="docs-inst-tab" data-inst="version">Pinned Version</button>
+              <button type="button" class="docs-inst-tab" data-inst="binary">Direct Binary</button>
+            </div>
+          </div>
+          <p class="docs-step-text">
+            Automatically detects your CPU architecture (<span class="code-chip">amd64 / arm64 / arm / 386</span>) and downloads the static Go binary with zero external dependencies.
+          </p>
+          <div class="docs-step-cmd-box">
+            <span class="cmd-prompt">$</span>
+            <code id="doc-install-cmd" data-value="curl -fsSL https://pm0.thakur.dev/install.sh | bash">curl -fsSL https://pm0.thakur.dev/install.sh | bash</code>
+            <button type="button" class="btn-copy" data-copy="doc-install-cmd" aria-label="Copy installation command">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <span>Copy</span>
+            </button>
+          </div>
+          <div class="docs-step-tip">
+            <span>Ensure <code>~/.local/bin</code> is in your <code>$PATH</code>:</span>
+            <div class="docs-path-cmd">
+              <code id="path-cmd" data-value="export PATH=&quot;$HOME/.local/bin:$PATH&quot;">export PATH="$HOME/.local/bin:$PATH"</code>
+              <button type="button" class="btn-copy btn-xs" data-copy="path-cmd">Copy</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="docs-step-row">
+          <div class="docs-step-title-wrap">
+            <div class="docs-step-heading-group">
+              <span class="step-num-pill">02</span>
+              <h3 class="docs-step-heading">Launch Supervised Processes</h3>
+            </div>
+            <button type="button" class="btn-copy" data-copy="step-cmd-2">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <span>Copy</span>
+            </button>
+          </div>
+          <p class="docs-step-text">Start your server in cluster mode. Workers share ports via Linux kernel <span class="text-red">SO_REUSEPORT</span> socket pooling.</p>
+          <pre class="docs-step-pre"><code id="step-cmd-2" data-value="pm0 start server.js -i max"><span class="t-red">$</span> pm0 start server.js -i max</code></pre>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="docs-step-row">
+          <div class="docs-step-title-wrap">
+            <div class="docs-step-heading-group">
+              <span class="step-num-pill">03</span>
+              <h3 class="docs-step-heading">Inspect Health &amp; Dynamic Scaling</h3>
+            </div>
+            <button type="button" class="btn-copy" data-copy="step-cmd-3">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <span>Copy</span>
+            </button>
+          </div>
+          <p class="docs-step-text">View your live status table with sub-40ms CLI execution. Adjust worker pool counts on the fly without restarts.</p>
+          <pre class="docs-step-pre"><code id="step-cmd-3" data-value="pm0 status &amp;&amp; pm0 scale web +2"><span class="t-red">$</span> pm0 status &amp;&amp; pm0 scale web +2</code></pre>
+        </div>
+
+        <!-- Step 4 -->
+        <div class="docs-step-row">
+          <div class="docs-step-title-wrap">
+            <div class="docs-step-heading-group">
+              <span class="step-num-pill">04</span>
+              <h3 class="docs-step-heading">Zero-Downtime Rolling Reload</h3>
+            </div>
+            <button type="button" class="btn-copy" data-copy="step-cmd-4">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <span>Copy</span>
+            </button>
+          </div>
+          <p class="docs-step-text">Deploy updates seamlessly with zero dropped packets and zero 502 Bad Gateway errors.</p>
+          <pre class="docs-step-pre"><code id="step-cmd-4" data-value="pm0 reload web"><span class="t-red">$</span> pm0 reload web</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- Quickstart -->
+    <h2 id="quickstart">Quick Start</h2>
+    <h3>Starting Applications</h3>
+    <p>Pass your application entry file. pm0 inspects file extensions and shebangs to select the appropriate interpreter automatically:</p>
+    
+    <div class="code-frame">
+      <div class="code-frame-header">
+        <div class="code-frame-title">
+          <span>bash</span>
+        </div>
+        <button type="button" class="btn-copy" data-copy="code-qs-start">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span>Copy</span>
+        </button>
+      </div>
+      <pre><code id="code-qs-start"><span class="t-dim"># Node.js fork mode</span>
+<span class="t-red">$</span> pm0 start server.js --name web
+
+<span class="t-dim"># Cluster mode: 1 worker per CPU core, sharing one port</span>
+<span class="t-red">$</span> pm0 start server.js -i max
+
+<span class="t-dim"># Bun &amp; Deno runtime targets</span>
+<span class="t-red">$</span> pm0 start server.ts --interpreter bun --name bun-api
+<span class="t-red">$</span> pm0 start server.ts --interpreter deno --name deno-api
+
+<span class="t-dim"># Python (auto-detects python3)</span>
+<span class="t-red">$</span> pm0 start app.py --name python-app
+
+<span class="t-dim"># Compiled native binaries (Go, Rust, C++)</span>
+<span class="t-red">$</span> pm0 start ./my-binary --interpreter none --name go-service</code></pre>
+    </div>
+
+    <h3>Inspecting &amp; Managing</h3>
+    <div class="code-frame">
+      <div class="code-frame-header">
+        <div class="code-frame-title">
+          <span>bash</span>
+        </div>
+        <button type="button" class="btn-copy" data-copy="code-qs-manage">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span>Copy</span>
+        </button>
+      </div>
+      <pre><code id="code-qs-manage"><span class="t-red">$</span> pm0 status                     <span class="t-dim"># Instant process status table</span>
+<span class="t-red">$</span> pm0 logs web --lines 100       <span class="t-dim"># Stream live logs with backlog</span>
+<span class="t-red">$</span> pm0 describe web               <span class="t-dim"># View uptime, RSS, and cgroup limits</span>
+<span class="t-red">$</span> pm0 scale web +2               <span class="t-dim"># Dynamically scale workers</span>
+<span class="t-red">$</span> pm0 reload web                 <span class="t-dim"># Zero-downtime rolling reload</span>
+<span class="t-red">$</span> pm0 restart web | pm0 stop web | pm0 delete web</code></pre>
+    </div>
+
+    <!-- Commands Table -->
+    <h2 id="commands">CLI Commands</h2>
+    <div class="table-card" style="margin:20px 0 32px">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Command</th><th>Aliases</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>start &lt;script&gt;</code></td><td>—</td><td>Launch process or ecosystem config under supervisor</td></tr>
+            <tr><td><code>stop &lt;name|id|all&gt;</code></td><td>—</td><td>Gracefully terminate application process</td></tr>
+            <tr><td><code>restart &lt;name|id|all&gt;</code></td><td>—</td><td>Hard restart (SIGTERM followed by spawn)</td></tr>
+            <tr><td><code>reload &lt;name|id|all&gt;</code></td><td>—</td><td>Rolling zero-downtime reload for cluster workers</td></tr>
+            <tr><td><code>scale &lt;name&gt; &lt;+N|-N|N&gt;</code></td><td>—</td><td>Add, remove, or set exact cluster worker count</td></tr>
+            <tr><td><code>delete &lt;name|id|all&gt;</code></td><td><code>del</code></td><td>Stop process and remove from supervisor registry</td></tr>
+            <tr><td><code>status</code></td><td><code>ls, list</code></td><td>Print formatted tabular process overview</td></tr>
+            <tr><td><code>jlist</code></td><td>—</td><td>Output PM2-compatible JSON array for monitoring tools</td></tr>
+            <tr><td><code>logs &lt;name&gt;</code></td><td>—</td><td>Tail buffered ring logs and stream new events</td></tr>
+            <tr><td><code>describe &lt;name&gt;</code></td><td><code>desc</code></td><td>Display comprehensive metadata, env vars, and stats</td></tr>
+            <tr><td><code>save</code></td><td><code>dump</code></td><td>Snapshot running process list to disk (<code>~/.pm0/dump.json</code>)</td></tr>
+            <tr><td><code>resurrect</code></td><td>—</td><td>Restore processes from the saved snapshot</td></tr>
+            <tr><td><code>startup</code></td><td>—</td><td>Configure systemd boot unit for automatic resurrect</td></tr>
+            <tr><td><code>unstartup</code></td><td>—</td><td>Remove systemd boot service</td></tr>
+            <tr><td><code>ping</code></td><td>—</td><td>Liveness check against daemon Unix socket</td></tr>
+            <tr><td><code>kill</code></td><td>—</td><td>Terminate background supervisor daemon safely</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Flags -->
+    <h2 id="flags">Common CLI Flags</h2>
+    <div class="table-card" style="margin:20px 0 32px">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Flag</th><th>Shorthand</th><th>Description</th><th>Example</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>--name</code></td><td><code>-n</code></td><td>Assign logical application identifier</td><td><code>--name api</code></td></tr>
+            <tr><td><code>--instances</code></td><td><code>-i</code></td><td>Cluster worker count (<code>N</code> or <code>max</code>)</td><td><code>-i max</code></td></tr>
+            <tr><td><code>--interpreter</code></td><td>—</td><td>Specify runtime (<code>bun</code>, <code>deno</code>, <code>none</code>)</td><td><code>--interpreter bun</code></td></tr>
+            <tr><td><code>--watch</code></td><td><code>-w</code></td><td>Restart automatically on source directory changes</td><td><code>--watch</code></td></tr>
+            <tr><td><code>--max-memory-restart</code></td><td>—</td><td>Restart app if RSS exceeds threshold</td><td><code>--max-memory-restart 512M</code></td></tr>
+            <tr><td><code>--env</code></td><td>—</td><td>Inject environment variable (repeatable)</td><td><code>--env PORT=3000</code></td></tr>
+            <tr><td><code>--</code></td><td>—</td><td>Pass remaining arguments straight to script</td><td><code>pm0 start app.js -- --port 8080</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Cluster Mode -->
+    <h2 id="cluster">Zero-Downtime Cluster Mode</h2>
+    <p>
+      Cluster mode allows Node.js applications to share a single TCP listening port across all CPU cores.
+      pm0 leverages Linux kernel <span class="code-chip">SO_REUSEPORT</span> socket sharing (available in Node.js ≥ 23.2, Linux kernel ≥ 3.9).
+    </p>
+    <p>
+      When rolling updates with <span class="code-chip">pm0 reload &lt;name&gt;</span>, new workers are spawned and verified healthy before the old worker is sent a graceful drain signal. 
+      This eliminates dropped packets and 502 Bad Gatewa    <!-- Ecosystem -->
+    <h2 id="ecosystem">Ecosystem File (ecosystem.config.js)</h2>
+    <p>
+      pm0 is 100% compatible with existing PM2 <span class="code-chip">ecosystem.config.js</span> files. You can drop in pm0 without changing your CI/CD configuration:
+    </p>
+    
+    <div class="code-frame">
+      <div class="code-frame-header">
+        <div class="code-frame-title">
+          <span>ecosystem.config.js</span>
+        </div>
+        <button type="button" class="btn-copy" data-copy="code-ecosystem-file">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span>Copy</span>
+        </button>
+      </div>
+      <pre><code id="code-ecosystem-file"><span class="t-red">module.exports</span> = {
+  apps: [
+    {
+      name: <span class="t-white">"api"</span>,
+      script: <span class="t-green">"./server.ts"</span>,
+      interpreter: <span class="t-green">"bun"</span>,
+      instances: <span class="t-yellow">2</span>,
+      env: {
+        PORT: <span class="t-yellow">3000</span>
+      },
+      env_production: {
+        PORT: <span class="t-yellow">3000</span>,
+        NODE_ENV: <span class="t-white">"production"</span>
+      }
+    },
+    {
+      name: <span class="t-white">"worker"</span>,
+      script: <span class="t-green">"./worker.py"</span>,
+      instances: <span class="t-yellow">1</span>
+    }
+  ]
+};</code></pre>
+    </div>
+
+    <p>Launch the ecosystem file:</p>
+    <div class="code-frame">
+      <div class="code-frame-header">
+        <div class="code-frame-title">
+          <span>bash</span>
+        </div>
+        <button type="button" class="btn-copy" data-copy="code-ecosystem-run">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span>Copy</span>
+        </button>
+      </div>
+      <pre><code id="code-ecosystem-run"><span class="t-dim"># Start all applications in the config</span>
+<span class="t-red">$</span> pm0 start ecosystem.config.js
+
+<span class="t-dim"># Start only a targeted app definition</span>
+<span class="t-red">$</span> pm0 start ecosystem.config.js --only api
+
+<span class="t-dim"># Apply production environment overrides</span>
+<span class="t-red">$</span> pm0 start ecosystem.config.js --env production</code></pre>
+    </div>
+
+    <!-- Persistence -->
+    <h2 id="persistence">Systemd Auto-Boot Persistence</h2>
+    <p>
+      Preserve your application state across server reboots. Snapshot the active process table:
+    </p>
+    <div class="code-frame">
+      <div class="code-frame-header">
+        <div class="code-frame-title">
+          <span>bash</span>
+        </div>
+        <button type="button" class="btn-copy" data-copy="code-pm0-save">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span>Copy</span>
+        </button>
+      </div>
+      <pre><code id="code-pm0-save" data-value="pm0 save"><span class="t-red">$</span> pm0 save</code></pre>
+    </div>
+
+    <p>Generate and register the systemd service unit with root privileges:</p>
+    <div class="code-frame">
+      <div class="code-frame-header">
+        <div class="code-frame-title">
+          <span>bash</span>
+        </div>
+        <button type="button" class="btn-copy" data-copy="code-pm0-startup">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span>Copy</span>
+        </button>
+      </div>
+      <pre><code id="code-pm0-startup" data-value="sudo pm0 startup"><span class="t-red">$</span> sudo pm0 startup</code></pre>
+    </div>
+    
+    <p>
+      pm0 writes state to <span class="code-chip">~/.pm0/dump.json</span>. Override the root directory by specifying the <span class="code-chip">PM0_HOME</span> environment variable.
+    </p>
+
+    <!-- System Requirements -->
+    <h2 id="requirements">System Requirements</h2>
+    <ul>
+      <li><strong>Operating System:</strong> Linux (Ubuntu, Debian, Fedora, Arch, Alpine, RHEL)</li>
+      <li><strong>Process Tracking:</strong> Linux cgroup v2 (with automatic fallback to process group IDs)</li>
+      <li><strong>Cluster Socket Sharing:</strong> Node.js ≥ 23.2, Linux kernel ≥ 3.9</li>
+      <li><strong>Fork Mode:</strong> Works out of the box with any executable binary or script</li>
+    </ul>
+
+    <!-- FAQ -->
+    <h2 id="faq">Frequently Asked Questions</h2>
+    <h3>How is pm0 so much faster than PM2?</h3>
+    <p>
+      PM2 is written in Node.js and requires spawning a complete V8 instance to parse commands, load hundreds of npm modules, and negotiate IPC. 
+      pm0 is compiled into a single static Go binary with direct Unix domain socket communication, reducing command execution time from ~250ms to ~38ms.
+    </p>
+
+    <h3>Does pm0 work with non-Node.js runtimes?</h3>
+    <p>
+      Yes! pm0 natively supervises Bun, Deno, Python, Go, Rust, Ruby, PHP, and shell scripts without external wrappers.
+    </p>
+
+    <h3>How can I build pm0 from source?</h3>
+    <p>pm0 requires Go ≥ 1.26:</p>
+    <div class="code-frame">
+      <div class="code-frame-header">
+        <div class="code-frame-title">
+          <span>bash</span>
+        </div>
+        <button type="button" class="btn-copy" data-copy="code-build-src">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span>Copy</span>
+        </button>
+      </div>
+      <pre><code id="code-build-src"><span class="t-red">$</span> git clone https://github.com/thakurdotdev/pm0.git
+<span class="t-red">$</span> cd pm0
+<span class="t-red">$</span> make build
+<span class="t-red">$</span> sudo make install</code></pre>
+    </div>
+  </article>
+
+  <!-- Right TOC (Wensity Screenshot 1) -->
+  <aside class="docs-right-toc" aria-label="Table of Contents">
+    <span class="toc-title">ON THIS PAGE</span>
+    <a class="toc-link active" href="#installation">Installation &amp; Short Path</a>
+    <a class="toc-link" href="#quickstart">Quick start</a>
+    <a class="toc-link" href="#commands">CLI Commands</a>
+    <a class="toc-link" href="#flags">Common Flags</a>
+    <a class="toc-link" href="#cluster">Cluster Mode</a>
+    <a class="toc-link" href="#ecosystem">Ecosystem File</a>
+    <a class="toc-link" href="#persistence">Systemd Auto-Boot</a>
+    <a class="toc-link" href="#requirements">Requirements</a>
+    <a class="toc-link" href="#faq">FAQ</a>
+  </aside>
+</main>
+
+<!-- Modern Footer (Wensity Style) -->
+<footer>
+  <div class="wrap">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <div class="footer-brand-title">
+          <span class="brand-mark">0</span>
+          <span>pm0</span>
+        </div>
+        <p>A fast, lightweight PM2-compatible process supervisor in a single Go binary. Linux-native with cgroup v2 process tracking.</p>
+        <div class="footer-status">
+          <span class="pill-status-dot"></span>
+          <span data-pm0-footer-version>v0.1.3 · MIT Licensed</span>
+        </div>
+      </div>
+
+      <div class="footer-col">
+        <b>Navigation</b>
+        <a href="/">Home</a>
+        <a href="/#features">Features</a>
+        <a href="/#benchmarks">Benchmarks</a>
+        <a href="/docs">Documentation</a>
+      </div>
+
+      <div class="footer-col">
+        <b>Resources</b>
+        <a href="https://github.com/thakurdotdev/pm0" target="_blank" rel="noopener">GitHub Repository</a>
+        <a href="https://github.com/thakurdotdev/pm0/releases" target="_blank" rel="noopener">Releases & Binaries</a>
+        <a href="/install.sh">install.sh script</a>
+      </div>
+
+      <div class="footer-col">
+        <b>Project</b>
+        <a href="https://github.com/thakurdotdev/pm0/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+        <a href="https://github.com/thakurdotdev/pm0/issues" target="_blank" rel="noopener">Issue Tracker</a>
+        <a href="https://thakur.dev" target="_blank" rel="noopener">thakur.dev</a>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <span>© 2026 pm0 · Crafted with Go, Linux cgroups & Bun.</span>
+      <span>Served statically on <a href="https://pm0.thakur.dev" style="color:var(--text);text-decoration:underline;text-underline-offset:2px">pm0.thakur.dev</a></span>
+    </div>
+  </div>
+</footer>
+
+<script src="/pm0.js?v=20260926e" defer></script>
+</body>
+</html>

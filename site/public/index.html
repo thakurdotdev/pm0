@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pm0 — Fast, Lightweight PM2-Compatible Process Manager</title>
+<meta name="description" content="pm0 is a fast, lightweight PM2-compatible process supervisor in Go. Same workflow (start, status, logs, scale, reload, ecosystem), 77% less memory, sub-40ms CLI. Install in seconds.">
+<link rel="canonical" href="https://pm0.thakur.dev/">
+<meta name="robots" content="index,follow">
+<meta name="theme-color" content="#000000">
+
+<!-- OpenGraph / Twitter -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="pm0">
+<meta property="og:title" content="pm0 — Fast, Lightweight PM2-Compatible Process Manager">
+<meta property="og:description" content="Same PM2 workflow. 77% less memory. 37× faster restarts. Native Node, Bun, Deno, Python, Go support.">
+<meta property="og:url" content="https://pm0.thakur.dev/">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="pm0 — Fast, Lightweight PM2-Compatible Process Manager">
+<meta name="twitter:description" content="PM2-compatible supervisor in Go. 16 MB idle, 38ms status at 500 apps, zero-downtime reload.">
+
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/pm0.css?v=20260926e">
+
+<style>
+/* Critical layout guards: guarantees clean UI even before external CSS loads */
+button { font-family: inherit; font-size: inherit; line-height: inherit; border: none; background: none; color: inherit; cursor: pointer; padding: 0; margin: 0; appearance: none; -webkit-appearance: none; }
+.brand-wrap { display: inline-flex !important; align-items: center !important; gap: 10px !important; }
+.terminal-panel { display: none; }
+.terminal-panel.active { display: block; }
+#bench-cards-view { display: grid; }
+#bench-table-view { display: none; }
+#bench-table-view.active { display: block; }
+.hero-install-pill code { scrollbar-width: none !important; -ms-overflow-style: none !important; }
+.hero-install-pill code::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
+.install-container { max-width: 580px; margin: 0 auto 12px; background: #08080a; border: 1px solid #15151b; border-radius: 10px; overflow: hidden; }
+.install-tabs { display: flex; align-items: center; border-bottom: 1px solid #191920; background: #060608; padding: 4px 8px; }
+.install-tab { color: #8e8e96; font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
+.install-tab.active { color: #fff; background: #14141a; }
+.install-row { display: flex; align-items: center; padding: 10px 14px; gap: 12px; text-align: left; }
+.hero-showcase-frame { max-width: 900px; margin: 0 auto 56px; background: #0a0a0d; border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; overflow: hidden; box-shadow: 0 20px 80px -20px rgba(0,0,0,0.9), 0 0 50px -20px rgba(255,46,46,0.12); }
+.term-tab-btn { color: #8e8e96; font-size: 11.5px; padding: 4px 10px; border-radius: 5px; cursor: pointer; }
+.term-tab-btn.active { color: #fff; background: #17171e; border: 1px solid #191920; }
+</style>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "pm0",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Linux",
+  "description": "Fast, lightweight PM2-compatible process supervisor written in Go.",
+  "offers": { "@type": "Offer", "price": "0" },
+  "url": "https://pm0.thakur.dev/"
+}
+</script>
+</head>
+<body>
+<!-- Ambient Background Lighting & Grid -->
+<div class="bg-ambient">
+  <div class="bg-spotlight"></div>
+  <div class="bg-grid"></div>
+</div>
+
+<!-- Header (Wensity Style) -->
+<header class="nav">
+  <div class="wrap nav-inner">
+    <div class="brand-wrap">
+      <a class="brand" href="/" aria-label="pm0 home">
+        <span class="brand-mark">0</span>
+        <span>pm0</span>
+      </a>
+      <span class="brand-badge" data-pm0-version>v0.1.3</span>
+    </div>
+
+    <nav class="nav-links" aria-label="Main Navigation">
+      <a class="nav-link" href="#features">Features</a>
+      <a class="nav-link" href="#benchmarks">Benchmarks</a>
+      <a class="nav-link" href="/docs">Docs</a>
+    </nav>
+
+    <div class="nav-actions">
+      <a class="btn btn-secondary btn-sm" href="https://github.com/thakurdotdev/pm0" target="_blank" rel="noopener">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2A10 10 0 0 0 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.1-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0 0 12 2z"/></svg>
+        GitHub
+      </a>
+
+      <a class="btn btn-red btn-sm" href="/docs">
+        Get Started ↗
+      </a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <!-- Hero Section (Wensity Style) -->
+    <section class="hero">
+      <a href="/docs" class="pill-badge">
+        <span class="pill-status-dot"></span>
+        <span data-pm0-live-pill>v0.1.3 is live — Drop-in PM2 supervisor in Go</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17l9.2-9.2M17 17V8H8"/></svg>
+      </a>
+
+      <h1>Process management<br><span class="hero-red">without the overhead.</span></h1>
+
+      <p class="lead">
+        pm0 is a drop-in PM2 replacement packaged into a single static Go binary. 
+        Keep your existing workflow — with <strong>77% less memory</strong>, 
+        sub-40ms CLI execution, and kernel-level zero-downtime reloads.
+      </p>
+
+      <!-- Sleek Centered Hero Install Command (Unbloated, No Duplicate Buttons) -->
+      <div class="hero-install-pill" role="region" aria-label="Installation Command">
+        <span class="install-prompt">$</span>
+        <code id="install-cmd" data-value="curl -fsSL https://pm0.thakur.dev/install.sh | bash">curl -fsSL https://pm0.thakur.dev/install.sh | bash</code>
+        <button type="button" class="btn-copy" data-copy="install-cmd" aria-label="Copy install command">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span>Copy</span>
+        </button>
+      </div>
+
+      <p class="hero-hint">Auto-detects <code>amd64 / arm64</code> · Zero dependencies · Statically linked Go binary</p>
+
+      <!-- Hero Centerpiece: Wensity Metallic Frame + Live Terminal -->
+      <div class="hero-showcase-frame">
+        <div class="terminal-header">
+          <div class="terminal-dots">
+            <span class="terminal-dot close"></span>
+            <span class="terminal-dot min"></span>
+            <span class="terminal-dot max"></span>
+          </div>
+          <div class="terminal-title">
+            <span>pm0 supervisor daemon</span>
+            <span class="t-dim">—</span>
+            <span class="t-red">38ms latency</span>
+          </div>
+          <div class="terminal-commands">
+            <button type="button" class="term-tab-btn active" data-term="status">pm0 status</button>
+            <button type="button" class="term-tab-btn" data-term="reload">pm0 reload</button>
+            <button type="button" class="term-tab-btn" data-term="scale">pm0 scale</button>
+            <button type="button" class="term-tab-btn" data-term="logs">pm0 logs</button>
+          </div>
+        </div>
+
+        <div class="terminal-body">
+          <!-- Panel: status -->
+          <div class="terminal-panel active" id="panel-status">
+            <div class="t-dim">$ pm0 status</div>
+            <table class="term-table">
+              <thead>
+                <tr>
+                  <th>name</th>
+                  <th>id</th>
+                  <th>mode</th>
+                  <th>pid</th>
+                  <th>uptime</th>
+                  <th>status</th>
+                  <th>cpu</th>
+                  <th>memory</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="t-white">api</td>
+                  <td>0</td>
+                  <td>cluster</td>
+                  <td>7820</td>
+                  <td>4d 18h</td>
+                  <td><span class="t-badge-online">● online</span></td>
+                  <td>0.1%</td>
+                  <td>16.4 MB</td>
+                </tr>
+                <tr>
+                  <td class="t-white">api</td>
+                  <td>1</td>
+                  <td>cluster</td>
+                  <td>7824</td>
+                  <td>4d 18h</td>
+                  <td><span class="t-badge-online">● online</span></td>
+                  <td>0.2%</td>
+                  <td>16.7 MB</td>
+                </tr>
+                <tr>
+                  <td class="t-white">web</td>
+                  <td>2</td>
+                  <td>fork</td>
+                  <td>7902</td>
+                  <td>12h 04</td>
+                  <td><span class="t-badge-online">● online</span></td>
+                  <td>0.0%</td>
+                  <td>22.1 MB</td>
+                </tr>
+                <tr>
+                  <td class="t-white">cron</td>
+                  <td>3</td>
+                  <td>fork</td>
+                  <td>8114</td>
+                  <td>2d 01h</td>
+                  <td><span class="t-badge-online">● online</span></td>
+                  <td>0.0%</td>
+                  <td>9.8 MB</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="t-dim" style="font-size:11.5px;padding-top:2px">Daemon RSS: 16.1 MB · 4 apps active · IPC: Unix socket (0.3ms)</div>
+          </div>
+
+          <!-- Panel: reload -->
+          <div class="terminal-panel" id="panel-reload">
+            <div class="t-dim">$ pm0 reload api</div>
+            <pre><span class="t-cyan">ℹ</span> [pm0] Initiating zero-downtime rolling reload for <span class="t-white">api</span> (cluster mode)
+<span class="t-dim">[1/2]</span> Spawning worker #0 replacement (pid 9102)... <span class="t-green">online in 42ms</span>
+<span class="t-dim">[1/2]</span> Socket pooled via kernel SO_REUSEPORT. Draining old worker pid 7820... <span class="t-green">clean exit</span>
+<span class="t-dim">[2/2]</span> Spawning worker #1 replacement (pid 9108)... <span class="t-green">online in 38ms</span>
+<span class="t-dim">[2/2]</span> Socket pooled via kernel SO_REUSEPORT. Draining old worker pid 7824... <span class="t-green">clean exit</span>
+<span class="t-red">✔</span> [pm0] Reload complete in 126ms. <span class="t-white">0 dropped packets. Zero downtime.</span></pre>
+          </div>
+
+          <!-- Panel: scale -->
+          <div class="terminal-panel" id="panel-scale">
+            <div class="t-dim">$ pm0 scale api +2</div>
+            <pre><span class="t-cyan">ℹ</span> [pm0] Scaling application <span class="t-white">api</span> from 2 to 4 workers...
+<span class="t-green">✔</span> [worker 2] spawned (pid 9401) on shared port :3000
+<span class="t-green">✔</span> [worker 3] spawned (pid 9405) on shared port :3000
+<span class="t-dim">Current cluster throughput capacity: 27,340 req/s (+96% headroom)</span></pre>
+          </div>
+
+          <!-- Panel: logs -->
+          <div class="terminal-panel" id="panel-logs">
+            <div class="t-dim">$ pm0 logs web --lines 4</div>
+            <pre><span class="t-dim">2026-09-26T01:54:12.891Z</span> [<span class="t-cyan">web:2</span>] HTTP 200 GET / 2.1ms 4.8kb
+<span class="t-dim">2026-09-26T01:54:13.014Z</span> [<span class="t-cyan">web:2</span>] HTTP 200 GET /pm0.css 0.4ms 9.6kb
+<span class="t-dim">2026-09-26T01:54:13.042Z</span> [<span class="t-cyan">web:2</span>] HTTP 200 GET /pm0.js 0.3ms 1.8kb
+<span class="t-dim">2026-09-26T01:54:15.210Z</span> [<span class="t-green">daemon</span>] Bounded log ring-buffer rotated: 0 bytes lost</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Metrics Ribbon (Full Width 1080px, Spacious & Non-Wrapping) -->
+    <div class="metrics-ribbon">
+      <div class="metric-item">
+        <div class="metric-header">
+          <span class="metric-val">16 MB</span>
+          <span class="metric-badge">−77% RAM</span>
+        </div>
+        <div class="metric-label">Idle daemon RSS memory footprint, saving RAM for your real apps.</div>
+      </div>
+
+      <div class="metric-item">
+        <div class="metric-header">
+          <span class="metric-val">38.5 ms</span>
+          <span class="metric-badge">6.4× Faster</span>
+        </div>
+        <div class="metric-label">Instant CLI status and listing at 500 managed applications.</div>
+      </div>
+
+      <div class="metric-item">
+        <div class="metric-header">
+          <span class="metric-val">6.5 ms</span>
+          <span class="metric-badge">37× Faster</span>
+        </div>
+        <div class="metric-label">Individual restart operations across 1,200 automated cycles.</div>
+      </div>
+
+      <div class="metric-item">
+        <div class="metric-header">
+          <span class="metric-val">Zero</span>
+          <span class="metric-badge">SO_REUSEPORT</span>
+        </div>
+        <div class="metric-label">Downtime or dropped TCP packets during rolling cluster reloads.</div>
+      </div>
+    </div>
+
+    <!-- Component Gallery / Features (Matching Wensity Screenshot 2) -->
+    <section class="section" id="features">
+      <div class="section-head">
+        <div class="eyebrow">Production Grade</div>
+        <h2>Everything PM2 does.<br><span class="hero-red">Nothing it doesn't need to.</span></h2>
+        <p class="sub">Drop-in workflow, rebuilt on a fraction of the resources.</p>
+      </div>
+
+      <div class="gallery-grid">
+        <!-- Card 1 -->
+        <div class="gallery-card">
+          <div class="gallery-card-preview" style="text-align:left;gap:6px">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <span style="font-size:12px;color:#fff"><span class="t-red">$</span> pm0 status</span>
+              <span style="font-size:10.5px;color:#10b981;background:rgba(16,185,129,0.12);padding:2px 7px;border-radius:4px;border:1px solid rgba(16,185,129,0.25)">Unix socket IPC</span>
+            </div>
+            <div style="font-size:11px;color:var(--text-faint)">Direct kernel IPC · 0.3ms roundtrip · No V8 warmup</div>
+          </div>
+          <div>
+            <div class="gallery-card-title">Sub-40ms CLI at Scale</div>
+            <p class="gallery-card-desc">Written in pure Go with direct Unix socket IPC. Never waits for a Node.js VM to boot.</p>
+          </div>
+        </div>
+
+        <!-- Card 2 -->
+        <div class="gallery-card">
+          <div class="gallery-card-preview" style="text-align:center">
+            <div style="display:inline-flex;align-items:center;gap:6px;background:#0d0d12;border:1px solid var(--border-subtle);padding:4px 10px;border-radius:6px">
+              <span class="pill-status-dot"></span>
+              <span style="font-size:12px;color:#fff;font-weight:600">Static ELF Binary</span>
+              <span style="font-size:11px;color:var(--accent-red)">~16 MB RSS</span>
+            </div>
+            <div style="font-size:11px;color:var(--text-faint);margin-top:6px">Zero runtime dependencies · Single file deploy</div>
+          </div>
+          <div>
+            <div class="gallery-card-title">16 MB Static Footprint</div>
+            <p class="gallery-card-desc">Single static binary. Doesn't consume 70MB+ of Node runtime just to watch your apps.</p>
+          </div>
+        </div>
+
+        <!-- Card 3 -->
+        <div class="gallery-card">
+          <div class="gallery-card-preview" style="text-align:center">
+            <div style="display:flex;align-items:center;justify-content:center;gap:10px">
+              <span class="code-chip">Worker #0</span>
+              <span style="color:var(--accent-red);font-weight:800">→</span>
+              <span class="code-chip" style="border-color:var(--accent-red);color:#fff">Worker #1 Active</span>
+            </div>
+            <div style="font-size:11px;color:#10b981;margin-top:8px">● 0 dropped TCP packets</div>
+          </div>
+          <div>
+            <div class="gallery-card-title">SO_REUSEPORT Socket Pooling</div>
+            <p class="gallery-card-desc">Kernel-level socket sharing rolls Node cluster workers one by one with zero dropped requests.</p>
+          </div>
+        </div>
+
+        <!-- Card 4 -->
+        <div class="gallery-card">
+          <div class="gallery-card-preview">
+            <div class="runtime-tags">
+              <span class="runtime-tag"><span class="dot dot-red"></span>Node.js</span>
+              <span class="runtime-tag"><span class="dot dot-red"></span>Bun</span>
+              <span class="runtime-tag"><span class="dot dot-blue"></span>Deno</span>
+              <span class="runtime-tag"><span class="dot dot-yellow"></span>Python</span>
+              <span class="runtime-tag"><span class="dot dot-green"></span>Go</span>
+              <span class="runtime-tag"><span class="dot dot-red"></span>Rust</span>
+            </div>
+          </div>
+          <div>
+            <div class="gallery-card-title">Native Multi-Runtime Support</div>
+            <p class="gallery-card-desc">Interpreters are auto-detected from shebangs or extensions with zero boilerplate.</p>
+          </div>
+        </div>
+
+        <!-- Card 5 -->
+        <div class="gallery-card">
+          <div class="gallery-card-preview" style="text-align:center">
+            <div style="color:var(--accent-red);font-weight:800;font-size:14px">✓ cgroup.kill enforced</div>
+            <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Zero orphaned zombie child processes</div>
+          </div>
+          <div>
+            <div class="gallery-card-title">Linux cgroup v2 Kill Paths</div>
+            <p class="gallery-card-desc">Strict Linux cgroup process hierarchy guarantees clean tree kills every single time.</p>
+          </div>
+        </div>
+
+        <!-- Card 6 -->
+        <div class="gallery-card">
+          <div class="gallery-card-preview">
+            <span class="t-red">module.exports</span> = { apps: [{ name: <span class="t-white">"api"</span>, script: <span class="t-green">"./server.ts"</span> }] };
+          </div>
+          <div>
+            <div class="gallery-card-title">Drop-in ecosystem.config.js</div>
+            <p class="gallery-card-desc">Switch in 30 seconds. Works with existing PM2 ecosystem files, env layers, and JSON parsing.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Benchmarks Section -->
+    <section class="section" id="benchmarks">
+      <div class="section-head">
+        <div class="eyebrow">Real-World Benchmarks</div>
+        <h2>Measured, not marketed.</h2>
+        <p class="sub">Benchmarked on an identical 2 vCPU / 3.9 GB Linux environment. Full test harness in the repo.</p>
+      </div>
+
+      <div class="benchmarks-container">
+        <div class="benchmarks-nav">
+          <button type="button" class="bench-btn active" data-view="cards">Visual Comparison</button>
+          <button type="button" class="bench-btn" data-view="table">Detailed Data Table</button>
+        </div>
+
+        <!-- Visual Comparison Cards -->
+        <div class="bench-cards-grid" id="bench-cards-view">
+          <div class="bench-card">
+            <div class="bench-card-head">
+              <span class="bench-card-title">List @ 500 apps</span>
+              <span class="bench-badge">6.4× faster</span>
+            </div>
+            <div class="bench-bars">
+              <div class="bench-bar-row">
+                <span class="bench-bar-entity">pm0</span>
+                <div class="bench-bar-track"><div class="bench-bar-inner pm0-win" style="width:16%"></div></div>
+                <span class="bench-bar-val">38.5 ms</span>
+              </div>
+              <div class="bench-bar-row">
+                <span class="bench-bar-entity">PM2</span>
+                <div class="bench-bar-track"><div class="bench-bar-inner pm2-loss" style="width:100%"></div></div>
+                <span class="bench-bar-val">245.0 ms</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="bench-card">
+            <div class="bench-card-head">
+              <span class="bench-card-title">Daemon Idle RSS</span>
+              <span class="bench-badge">−77% RAM</span>
+            </div>
+            <div class="bench-bars">
+              <div class="bench-bar-row">
+                <span class="bench-bar-entity">pm0</span>
+                <div class="bench-bar-track"><div class="bench-bar-inner pm0-win" style="width:23%"></div></div>
+                <span class="bench-bar-val">16 MB</span>
+              </div>
+              <div class="bench-bar-row">
+                <span class="bench-bar-entity">PM2</span>
+                <div class="bench-bar-track"><div class="bench-bar-inner pm2-loss" style="width:100%"></div></div>
+                <span class="bench-bar-val">69 MB</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="bench-card">
+            <div class="bench-card-head">
+              <span class="bench-card-title">1,200 Restarts</span>
+              <span class="bench-badge">31× faster</span>
+            </div>
+            <div class="bench-bars">
+              <div class="bench-bar-row">
+                <span class="bench-bar-entity">pm0</span>
+                <div class="bench-bar-track"><div class="bench-bar-inner pm0-win" style="width:3%"></div></div>
+                <span class="bench-bar-val">9.3 s</span>
+              </div>
+              <div class="bench-bar-row">
+                <span class="bench-bar-entity">PM2</span>
+                <div class="bench-bar-track"><div class="bench-bar-inner pm2-loss" style="width:100%"></div></div>
+                <span class="bench-bar-val">290.0 s</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="bench-card">
+            <div class="bench-card-head">
+              <span class="bench-card-title">Ecosystem Start @ 500</span>
+              <span class="bench-badge">6.3× faster</span>
+            </div>
+            <div class="bench-bars">
+              <div class="bench-bar-row">
+                <span class="bench-bar-entity">pm0</span>
+                <div class="bench-bar-track"><div class="bench-bar-inner pm0-win" style="width:16%"></div></div>
+                <span class="bench-bar-val">0.31 s</span>
+              </div>
+              <div class="bench-bar-row">
+                <span class="bench-bar-entity">PM2</span>
+                <div class="bench-bar-track"><div class="bench-bar-inner pm2-loss" style="width:100%"></div></div>
+                <span class="bench-bar-val">1.97 s</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="bench-card">
+            <div class="bench-card-head">
+              <span class="bench-card-title">100 MB/s Log Flood</span>
+              <span class="bench-badge">3.5× less CPU</span>
+            </div>
+            <div class="bench-bars">
+              <div class="bench-bar-row">
+                <span class="bench-bar-entity">pm0</span>
+                <div class="bench-bar-track"><div class="bench-bar-inner pm0-win" style="width:28%"></div></div>
+                <span class="bench-bar-val">5.7% CPU</span>
+              </div>
+              <div class="bench-bar-row">
+                <span class="bench-bar-entity">PM2</span>
+                <div class="bench-bar-track"><div class="bench-bar-inner pm2-loss" style="width:100%"></div></div>
+                <span class="bench-bar-val">20.2% CPU</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="bench-card">
+            <div class="bench-card-head">
+              <span class="bench-card-title">Cluster Throughput</span>
+              <span class="bench-badge">+1.5k req/s</span>
+            </div>
+            <div class="bench-bars">
+              <div class="bench-bar-row">
+                <span class="bench-bar-entity">pm0</span>
+                <div class="bench-bar-track"><div class="bench-bar-inner pm0-win" style="width:100%"></div></div>
+                <span class="bench-bar-val">27.3k req/s</span>
+              </div>
+              <div class="bench-bar-row">
+                <span class="bench-bar-entity">PM2</span>
+                <div class="bench-bar-track"><div class="bench-bar-inner pm2-loss" style="width:94%"></div></div>
+                <span class="bench-bar-val">25.8k req/s</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Full Detailed Table View -->
+        <div class="table-card" id="bench-table-view" style="display:none">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Benchmark Metric</th>
+                  <th>PM2 v7.0.4</th>
+                  <th data-pm0-table-header>pm0 v0.1.3</th>
+                  <th>Advantage</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>CLI List @ 500 apps</strong></td>
+                  <td>245 ms</td>
+                  <td class="win-val">38.5 ms</td>
+                  <td><span class="bench-badge">6.4× faster</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Ecosystem start @ 500 apps</strong></td>
+                  <td>1.97 s / 139 MB</td>
+                  <td class="win-val">0.31 s / 78 MB</td>
+                  <td><span class="bench-badge">6.3× faster, −44% RSS</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Daemon RSS (Idle footprint)</strong></td>
+                  <td>69 MB</td>
+                  <td class="win-val">16 MB</td>
+                  <td><span class="bench-badge">−77% memory</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Idle CPU @ 0 apps</strong></td>
+                  <td>0.033%</td>
+                  <td class="win-val">0.033%</td>
+                  <td><span>Parity</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Cluster throughput (-i 2)</strong></td>
+                  <td>25.8k req/s</td>
+                  <td class="win-val">27.3k req/s</td>
+                  <td><span class="bench-badge">+6% higher</span></td>
+                </tr>
+                <tr>
+                  <td><strong>1,200 process restart ops</strong></td>
+                  <td>238 ms / 290 s</td>
+                  <td class="win-val">6.5 ms / 9.3 s</td>
+                  <td><span class="bench-badge">37× faster</span></td>
+                </tr>
+                <tr>
+                  <td><strong>100 MB/s sustained log flood</strong></td>
+                  <td>20.2% CPU</td>
+                  <td class="win-val">5.7% CPU</td>
+                  <td><span class="bench-badge">3.5× lower CPU</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Log rotation mechanism</strong></td>
+                  <td>External module required</td>
+                  <td class="win-val">Built-in ring buffers</td>
+                  <td><span class="bench-badge">Zero lost lines</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="table-footnote">
+            Environment: Linux 6.8 kernel, 2 vCPU, 3.9 GB RAM, cgroup v2. All tests executed with warm caches and 100-run averages.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Modern CTA Frame (Wensity Screenshot 4 Style) -->
+    <div class="cta-box">
+      <h2>Ditch supervisor bloat.<br><span class="hero-red">Deploy in seconds.</span></h2>
+      <p class="sub">One single static Go binary. Zero dependencies. MIT licensed.</p>
+      
+      <div class="install-container" style="max-width:540px;margin:0 auto 20px">
+        <div class="install-row">
+          <span class="install-prompt">$</span>
+          <code class="install-cmd" id="install-cmd-cta">curl -fsSL https://pm0.thakur.dev/install.sh | bash</code>
+          <button type="button" class="btn-copy" data-copy="install-cmd-cta">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <span>Copy</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="cta-actions">
+        <a class="btn btn-red" href="/docs">
+          Read Documentation ↗
+        </a>
+        <a class="btn btn-secondary" href="https://github.com/thakurdotdev/pm0" target="_blank" rel="noopener">
+          Star on GitHub ★
+        </a>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- Modern Footer (Wensity Style with top reflection, Screenshot 4) -->
+<footer>
+  <div class="wrap">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <div class="footer-brand-title">
+          <span class="brand-mark">0</span>
+          <span>pm0</span>
+        </div>
+        <p>A fast, lightweight PM2-compatible process supervisor in a single Go binary. Linux-native with cgroup v2 process tracking.</p>
+        <div class="footer-status">
+          <span class="pill-status-dot"></span>
+          <span data-pm0-footer-version>v0.1.3 · MIT Licensed</span>
+        </div>
+      </div>
+
+      <div class="footer-col">
+        <b>Product</b>
+        <a href="#features">Features</a>
+        <a href="#benchmarks">Benchmarks</a>
+        <a href="/docs">Documentation</a>
+      </div>
+
+      <div class="footer-col">
+        <b>Resources</b>
+        <a href="https://github.com/thakurdotdev/pm0" target="_blank" rel="noopener">GitHub Repository</a>
+        <a href="https://github.com/thakurdotdev/pm0/releases" target="_blank" rel="noopener">Releases & Binaries</a>
+        <a href="/install.sh">install.sh script</a>
+      </div>
+
+      <div class="footer-col">
+        <b>Project</b>
+        <a href="https://github.com/thakurdotdev/pm0/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+        <a href="https://github.com/thakurdotdev/pm0/issues" target="_blank" rel="noopener">Issue Tracker</a>
+        <a href="https://thakur.dev" target="_blank" rel="noopener">thakur.dev</a>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <span>© 2026 pm0 · Crafted with Go, Linux cgroups & Bun.</span>
+      <span>Served statically on <a href="https://pm0.thakur.dev" style="color:var(--text);text-decoration:underline;text-underline-offset:2px">pm0.thakur.dev</a></span>
+    </div>
+  </div>
+</footer>
+
+<script src="/pm0.js?v=20260926e" defer></script>
+</body>
+</html>
