@@ -56,8 +56,12 @@ func scanPgrpMembers(pgid int) []procVictim {
 // CPU ticks (monit, treeRSS -> max_memory_restart fired at limit/2 in
 // pgid mode). Kill coverage is unchanged: an excluded pid is already a
 // pgrp-member victim.
-func scanReparentedOrphans(selfPid int, markerValue string, excludePgrp int) []procVictim {
+func scanReparentedOrphans(selfPid int, markerValue string, excludePgrp int, launchToken ...string) []procVictim {
 	var out []procVictim
+	token := ""
+	if len(launchToken) > 0 {
+		token = launchToken[0]
+	}
 	for _, pid := range procPids() {
 		si, err := readStatInfo(pid)
 		if err != nil || si.State == 'Z' {
@@ -73,9 +77,13 @@ func scanReparentedOrphans(selfPid int, markerValue string, excludePgrp int) []p
 		if rerr != nil {
 			continue // dying, or not ours to read
 		}
-		if envHasMarker(env, EnvMarkerKey, markerValue) {
-			out = append(out, procVictim{Pid: pid, Starttime: si.Starttime})
+		if !envHasMarker(env, EnvMarkerKey, markerValue) {
+			continue
 		}
+		if token != "" && !envHasMarker(env, EnvLaunchKey, token) {
+			continue
+		}
+		out = append(out, procVictim{Pid: pid, Starttime: si.Starttime})
 	}
 	return out
 }

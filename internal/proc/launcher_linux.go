@@ -10,10 +10,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
+
+var launchSeq atomic.Uint64
 
 // Launcher spawns processes and hands out Handles. One Launcher per
 // daemon (or per test). NewLauncher starts the process-wide reaper, so
@@ -85,8 +89,10 @@ func (l *Launcher) Launch(spec Spec) (*Handle, error) {
 	}
 	// Attribution marker: strip any inherited one, then append ours so the
 	// orphan sweep can attribute tree members to this app.
+	launchToken := fmt.Sprintf("%d-%d-%d", os.Getpid(), time.Now().UnixNano(), launchSeq.Add(1))
 	env := filterEnvKey(base, EnvMarkerKey)
 	env = append(env, EnvMarkerKey+"="+spec.Name)
+	env = append(filterEnvKey(env, EnvLaunchKey), EnvLaunchKey+"="+launchToken)
 
 	var (
 		cmd    *exec.Cmd
@@ -204,6 +210,7 @@ func (l *Launcher) Launch(spec Spec) (*Handle, error) {
 		killTimeout: spec.KillTimeout,
 		done:        make(chan struct{}),
 		ipc:         ipc,
+		launchToken: launchToken,
 	}
 	if h.starttime, err = StartTime(h.pid); err != nil {
 		// Process died between fork and now — still hand out the handle;

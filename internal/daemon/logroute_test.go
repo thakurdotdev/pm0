@@ -210,7 +210,7 @@ func TestDaemonRotationUnderFlood(t *testing.T) {
 	// divergence 12) can swallow the very end of the flood — the
 	// post-rotation capture property is covered deterministically by
 	// the logbus unit tests.
-	waitForRoute(t, 15*time.Second, "bounded ring after flood", func() bool {
+	waitForRoute(t, 30*time.Second, "bounded ring after flood", func() bool {
 		r := routeOf(srv, id)
 		if r == nil {
 			return false

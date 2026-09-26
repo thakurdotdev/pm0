@@ -2,13 +2,17 @@ BINARY := pm0
 FAKECHILD := fakechild
 GO := go
 PREFIX ?= /usr/local
-# Release version comes from package.json (the same source npm pack uses for
-# the tarball name) so `pm0 version`, the tgz and the prebuilds always agree.
-# git describe is only a fallback for a checkout without package.json — it
-# returns a bare hash when no tag exists, which is how a 1.0.1 prebuild once
-# reported itself as a commit id.
+# Release version priority:
+# 1. VERSION environment/CLI override (e.g. `make release VERSION=0.1.3`)
+# 2. Exact git tag at HEAD (e.g. `v0.1.3` -> `0.1.3`)
+# 3. package.json version
+# 4. git describe fallback
+# 5. Default 1.0.0
+GIT_EXACT_TAG := $(shell git describe --tags --exact-match 2>/dev/null | sed 's/^v//')
 PKG_VERSION := $(shell node -p "require('./package.json').version" 2>/dev/null || echo "")
-VERSION ?= $(if $(PKG_VERSION),$(PKG_VERSION),$(shell git describe --tags --always --dirty 2>/dev/null || echo 1.0.0))
+GIT_DESCRIBE := $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
+
+VERSION ?= $(if $(GIT_EXACT_TAG),$(GIT_EXACT_TAG),$(if $(PKG_VERSION),$(PKG_VERSION),$(if $(GIT_DESCRIBE),$(GIT_DESCRIBE),1.0.0)))
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DIST := dist
 

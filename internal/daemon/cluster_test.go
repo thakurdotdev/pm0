@@ -75,6 +75,7 @@ func startCluster(t *testing.T, c *client.Client, script, name, port string, n i
 		ExecMode:    "cluster",
 		Instances:   n,
 		Autorestart: true,
+		MinUptimeMs: 2500,
 		Env:         map[string]string{"TEST_PORT": port},
 		Cwd:         t.TempDir(),
 	}})

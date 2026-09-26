@@ -16,7 +16,10 @@ import (
 // EnvMarkerKey tags every process spawned by a launcher so tree members
 // can be attributed during the pgid-mode orphan sweep. Grandchildren
 // inherit it unless they clear their own environment.
-const EnvMarkerKey = "_PM0_APP"
+const (
+	EnvMarkerKey = "_PM0_APP"
+	EnvLaunchKey = "_PM0_LAUNCH"
+)
 
 // Internal env keys used by the cgroup attach wrapper. The wrapper strips
 // them before exec'ing the target so the app never sees them.

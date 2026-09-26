@@ -26,6 +26,7 @@ type Handle struct {
 	killTimeout time.Duration
 	ipc         *ipcChannel // node-IPC parent side (always-on, M5)
 	oomBase     uint64      // memory.events oom_kill at launch (divergence 6)
+	launchToken string      // unique launch token for reparented orphan isolation
 
 	mu   sync.Mutex
 	exit ExitInfo
@@ -147,7 +148,7 @@ func (h *Handle) TreePids() []int {
 			out = append(out, v.Pid)
 		}
 		self := os.Getpid()
-		for _, v := range scanReparentedOrphans(self, h.spec.Name, h.pid) {
+		for _, v := range scanReparentedOrphans(self, h.spec.Name, h.pid, h.launchToken) {
 			out = append(out, v.Pid)
 		}
 		return out
@@ -232,7 +233,7 @@ func (h *Handle) forcePgid() error {
 		// those and a zombie cannot run).
 		victims := scanPgrpMembers(h.pid)
 		// (3) setsid escapees reparented to us.
-		victims = append(victims, scanReparentedOrphans(os.Getpid(), h.spec.Name, h.pid)...)
+		victims = append(victims, scanReparentedOrphans(os.Getpid(), h.spec.Name, h.pid, h.launchToken)...)
 		killVictimsVerified(victims, unix.SIGKILL)
 
 		if h.treeEmpty() {
@@ -255,7 +256,7 @@ func (h *Handle) treeEmpty() bool {
 	if len(scanPgrpMembers(h.pid)) > 0 {
 		return false
 	}
-	if len(scanReparentedOrphans(os.Getpid(), h.spec.Name, h.pid)) > 0 {
+	if len(scanReparentedOrphans(os.Getpid(), h.spec.Name, h.pid, h.launchToken)) > 0 {
 		return false
 	}
 	return true

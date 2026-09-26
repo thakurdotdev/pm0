@@ -53,7 +53,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: install build dependencies
-        run: apt-get update && apt-get install -y gcc libc6-dev
+        run: apt-get update && apt-get install -y gcc libc6-dev ca-certificates git
       - uses: actions/setup-go@v5
         with:
           go-version-file: "go.mod"

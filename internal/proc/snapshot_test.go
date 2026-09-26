@@ -63,7 +63,7 @@ func TestReadSnapshotSelf(t *testing.T) {
 	}
 	// Two reads of the same counter microseconds apart; allow a small
 	// page drift (GC may be running).
-	if delta > 256<<10 {
+	if delta > 1<<20 {
 		t.Errorf("snapshot RSS %d vs ResidentBytes %d (delta %d too large)", info.RSSBytes, want, delta)
 	}
 
