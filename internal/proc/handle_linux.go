@@ -157,6 +157,16 @@ func (h *Handle) TreePids() []int {
 	}
 }
 
+const (
+	// exitPollInterval is how often the kill path re-checks /proc for the
+	// leader's disappearance (this is the whole exit-detection latency for
+	// adopted trees, whose exit the reaper cannot observe).
+	exitPollInterval = 50 * time.Millisecond
+	// slowStopThreshold: kill paths at or above this log a phase breakdown
+	// to the daemon log (a normal stop is tens of ms).
+	slowStopThreshold = 250 * time.Millisecond
+)
+
 // Stop runs the full kill path (PM2 stop semantics):
 //
 //	kill_signal to tree -> wait kill_timeout -> force path -> verify
@@ -165,17 +175,28 @@ func (h *Handle) TreePids() []int {
 // A leader that exited early does not shortcut the force path: its
 // children may still be alive (orphans), and they must die too (I1).
 func (h *Handle) Stop() error {
-	deadline := time.Now().Add(h.killTimeout)
+	return h.StopWithin(time.Now().Add(h.killTimeout))
+}
+
+// StopWithin is Stop with a caller-supplied graceful deadline: the
+// kill_signal -> force window ends at deadline instead of
+// now+kill_timeout. Reload uses it to share ONE kill_timeout budget
+// between the node-IPC 'shutdown' handoff and the signal kill — I5
+// (kill_signal -> kill_timeout -> SIGKILL -> grace) is a TOTAL window,
+// not one window per phase. A deadline already in the past (the handoff
+// consumed the budget) skips straight to the force path. The force and
+// cgroup-cleanup phases below are unchanged and still bounded by
+// GracePeriod, so "zero live procs after Stop" (I1) holds either way.
+func (h *Handle) StopWithin(deadline time.Time) error {
+	start := time.Now()
 
 	// Graceful phase (best effort: stale tree members are fine here).
 	_ = h.Signal(h.killSignal)
-
-	select {
-	case <-h.done:
-	case <-time.After(time.Until(deadline)):
-	}
+	h.waitExitOrDone(deadline)
+	graceful := time.Since(start)
 
 	// Force phase.
+	forceStart := time.Now()
 	var err error
 	switch h.mode {
 	case ModeCgroupKill:
@@ -187,12 +208,14 @@ func (h *Handle) Stop() error {
 	default:
 		err = fmt.Errorf("unknown mode %q", h.mode)
 	}
+	force := time.Since(forceStart)
 
-	// Leader exit delivery: force paths killed it, give the reaper a beat.
-	select {
-	case <-h.done:
-	case <-time.After(GracePeriod):
-	}
+	// Leader exit delivery: the force paths killed it, give the exit event
+	// a beat — bounded by GracePeriod, but the watcher returns as soon as
+	// the leader is observably gone (adopted trees included).
+	exitStart := time.Now()
+	h.waitExitOrDone(time.Now().Add(GracePeriod))
+	exitWait := time.Since(exitStart)
 
 	// Release the IPC reader: the tree is gone (or about to be), nothing
 	// else will drain the channel. Pump's blocked read returns via
@@ -206,7 +229,60 @@ func (h *Handle) Stop() error {
 			err = fmt.Errorf("cgroup cleanup: %w", rmErr)
 		}
 	}
+
+	// Slow stops are the ones users ask about: log the phase breakdown so
+	// the daemon log answers "why did that stop take N seconds" directly.
+	if total := time.Since(start); total >= slowStopThreshold {
+		fmt.Fprintf(os.Stderr,
+			"pm0 daemon: slow stop pid=%d mode=%s graceful=%s force=%s exit_wait=%s total=%s err=%v\n",
+			h.pid, h.mode, graceful.Round(time.Millisecond), force.Round(time.Millisecond),
+			exitWait.Round(time.Millisecond), total.Round(time.Millisecond), err)
+	}
 	return err
+}
+
+// waitExitOrDone blocks until the leader exit event (h.done), an observable
+// disappearance of the leader in /proc, or until.
+//
+// The reaper closes h.done promptly for a leader that is this process's
+// child. An ADOPTED leader (daemon restarted; the tree reparented to init)
+// is invisible to wait4, so its exit arrives from watchNonChild's 1s poller
+// — up to a poll interval late, on top of kill_timeout. Checking the
+// identity directly here makes a stop/restart of an adopted tree return as
+// soon as the leader is really gone.
+func (h *Handle) waitExitOrDone(until time.Time) {
+	remaining := time.Until(until)
+	if remaining <= 0 {
+		return
+	}
+	deadline := time.NewTimer(remaining)
+	defer deadline.Stop()
+	tick := time.NewTicker(exitPollInterval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-h.done:
+			return
+		case <-tick.C:
+			if h.leaderGone() {
+				return
+			}
+		case <-deadline.C:
+			return
+		}
+	}
+}
+
+// leaderGone reports whether the leader is no longer the process we
+// launched: /proc no longer has it, or the pid was reused (starttime
+// mismatch). A zombie still counts as present — it must be reaped first,
+// and reaping is the reaper's job, never a kill-path shortcut.
+func (h *Handle) leaderGone() bool {
+	st, err := StartTime(h.pid)
+	if err != nil {
+		return true
+	}
+	return h.starttime != 0 && st != h.starttime
 }
 
 // forcePgid is the pgid-mode force phase: SIGKILL everything attributable

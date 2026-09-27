@@ -1,6 +1,6 @@
 {
   "name": "pm0-site",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "private": true,
   "description": "Landing + docs site for pm0 (pm0.thakur.dev), served with Bun",
   "scripts": {

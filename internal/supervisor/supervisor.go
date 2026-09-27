@@ -18,6 +18,7 @@ package supervisor
 import (
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"sync"
@@ -374,13 +375,19 @@ func (s *Supervisor) resolveLocked(identifier string) (*machine.App, error) {
 // ReloadIDs rolls the given apps one pm_id at a time (PM2 reload, God/
 // Reload.js softReload): per app, park the old incarnation, start a
 // replacement AT THE SAME pm_id, wait for it to stabilize, then retire the
-// old with the 'shutdown' node-IPC handoff. With cluster mode the old and
-// new instances serve concurrently through the shared reuseport pool, so
-// the roll drops no connections. A replacement that dies or fails to
-// stabilize within listen_timeout is removed and the old incarnation is
-// RESTORED (PM2 unparkOldWorker) — a failed reload never leaves the app
-// down. Errors are per-instance: the roll continues with the remaining
-// ids and the first error is returned.
+// old within ONE kill_timeout budget (the 'shutdown' node-IPC handoff for
+// cluster workers, the signal kill otherwise — never both at full length).
+// With cluster mode the old and new instances serve concurrently through
+// the shared reuseport pool, so the roll drops no connections. A
+// replacement that dies or fails to stabilize within listen_timeout is
+// removed and the old incarnation is RESTORED (PM2 unparkOldWorker) — a
+// failed reload never leaves the app down. Errors are per-instance: the
+// roll continues with the remaining ids and the first error is returned.
+//
+// The roll is deliberately sequential (one instance at a time): overlapping
+// withdrawals is how a roll turns into an outage when the replacement is
+// bad. Per-instance cost is bounded by min_uptime (gate) + kill_timeout
+// (retire), both of which are logged per phase (see reloadTrace).
 func (s *Supervisor) ReloadIDs(ids []int) ([]int, error) {
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
@@ -403,7 +410,25 @@ func (s *Supervisor) ReloadIDs(ids []int) ([]int, error) {
 // (negative, hidden from List/resolve — PM2 parks at the "_old_<id>" key).
 func parkKey(id int) int { return -id - 1 }
 
-func (s *Supervisor) reloadOne(id int) error {
+func (s *Supervisor) reloadOne(id int) (err error) {
+	opStart := time.Now()
+	var replStart, retireStart time.Time
+	// Per-phase timing goes to the daemon log: the roll is a deploy-time
+	// event (never a hot path), and a slow reload is otherwise opaque
+	// (only the CLI's total is visible). gate = replacement stability,
+	// retire = ONE shared kill_timeout budget for the old incarnation.
+	defer func() {
+		base := replStart
+		if base.IsZero() {
+			base = opStart
+		}
+		if retireStart.IsZero() {
+			reloadTrace(id, "aborted", base, err)
+			return
+		}
+		reloadTrace(id, "rolled", replStart, err, retireStart)
+	}()
+
 	s.mu.Lock()
 	old := s.apps[id]
 	if old == nil {
@@ -420,6 +445,7 @@ func (s *Supervisor) reloadOne(id int) error {
 
 	// Replacement at the same pm_id (PM2 reuses the id; the old worker
 	// rides the _old_ slot until it is retired).
+	replStart = time.Now()
 	if err := s.StartReplacementAt(cfg, id, prevRestarts+1); err != nil {
 		s.unpark(id, old)
 		return fmt.Errorf("start replacement: %w", err)
@@ -455,11 +481,10 @@ func (s *Supervisor) reloadOne(id int) error {
 		switch snap.Status {
 		case machine.StatusOnline:
 			if time.Since(time.UnixMilli(snap.PmUptimeMs)) >= minUptime {
+				retireStart = time.Now()
 				return s.retireParked(id, old)
 			}
 		case machine.StatusErrored, machine.StatusStopped:
-			// The replacement died and its policy parked it: restore the
-			// old (which never stopped serving).
 			// The replacement died and its policy parked it: restore the
 			// old (which never stopped serving).
 			_ = s.Delete(strconv.Itoa(id))
@@ -474,8 +499,27 @@ func (s *Supervisor) reloadOne(id int) error {
 	}
 }
 
-// retireParked stops the parked old incarnation with the shutdown-IPC
-// handoff and removes its registry slot.
+// reloadTrace writes one per-instance reload timing line to the daemon log:
+// gate = replacement spawn + stability wait, retire = the single shared
+// kill_timeout budget spent stopping the old incarnation. Completed rolls
+// always log; aborted rolls are opt-in (PM0_RELOAD_TRACE=1 on the daemon)
+// because their error is already surfaced to the caller.
+func reloadTrace(id int, phase string, base time.Time, err error, retireStart ...time.Time) {
+	elapsed := time.Since(base).Round(time.Millisecond)
+	if len(retireStart) == 0 {
+		if os.Getenv("PM0_RELOAD_TRACE") != "1" {
+			return
+		}
+		fmt.Printf("pm0 daemon: reload pm_id %d %s after %s: %v\n", id, phase, elapsed, err)
+		return
+	}
+	fmt.Printf("pm0 daemon: reload pm_id %d %s: gate=%s retire=%s err=%v\n",
+		id, phase, elapsed, time.Since(retireStart[0]).Round(time.Millisecond), err)
+}
+
+// retireParked stops the parked old incarnation with the (cluster-only)
+// shutdown-IPC handoff under one shared kill_timeout budget, then removes
+// its registry slot.
 func (s *Supervisor) retireParked(id int, old *machine.App) error {
 	err := old.DeleteGraceful() // 'shutdown' message, then the kill path
 	s.mu.Lock()

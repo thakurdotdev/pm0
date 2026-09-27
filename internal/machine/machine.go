@@ -163,6 +163,13 @@ type App struct {
 	// ExecMode cluster launches. Empty for fork apps and bare unit tests.
 	preloadPath string
 
+	// ipcHandoff gates the reload 'shutdown' node-IPC handoff to cluster
+	// workers: only those can read NODE_CHANNEL_FD and act on it. For
+	// everything else (fork node, Bun, Python, Go, shell) the frame is
+	// never read, so waiting on it wasted a full kill_timeout per reload.
+	// See stopGraceful.
+	ipcHandoff bool
+
 	mu            sync.Mutex // guards everything below (snapshot readers)
 	status        Status
 	handle        *proc.Handle
@@ -266,6 +273,7 @@ func buildApp(cfg config.App, l *proc.Launcher, opts Options) (*App, error) {
 		status:      StatusStopped,
 		restarts:    opts.InitialRestarts,
 		preloadPath: opts.ClusterPreloadPath,
+		ipcHandoff:  cfg.ExecMode == "cluster",
 	}
 	return a, nil
 }
@@ -391,15 +399,12 @@ func (a *App) onStart() error {
 // onStop stops a running app; no-op success when already stopped (pm2
 // stop on a stopped app is success). The kill path runs here, bounded by
 // kill_timeout + grace (I5). gracefulIPC (cluster reload stop): the
-// 'shutdown' node-IPC message is delivered first and the app gets the
-// grace window to exit on its own before the kill path starts (PM2
-// God/Reload.js softCleanDeleteProcess).
+// 'shutdown' node-IPC message is delivered first and the cluster worker
+// gets the shared budget to exit on its own before the signal kill
+// (PM2 God/Reload.js softCleanDeleteProcess).
 func (a *App) onStop(gracefulIPC bool) error {
 	a.clearPark(a.parkSnapshot())
-	if gracefulIPC {
-		a.shutdownPhase()
-	}
-	return a.stopTree()
+	return a.stopGraceful(gracefulIPC)
 }
 
 // onRestart is pm2 restart semantics: stop if running, then (re)launch —
@@ -429,10 +434,7 @@ func (a *App) resetStateLocked() {
 // the registry entry (and frees the pm_id) after the reply.
 func (a *App) onDelete(gracefulIPC bool) error {
 	a.clearPark(a.parkSnapshot())
-	if gracefulIPC {
-		a.shutdownPhase()
-	}
-	if err := a.stopTree(); err != nil {
+	if err := a.stopGraceful(gracefulIPC); err != nil {
 		// Even on a failed kill path the app is being removed: report the
 		// error but still tear the actor down.
 		a.mu.Lock()
@@ -446,28 +448,54 @@ func (a *App) onDelete(gracefulIPC bool) error {
 	return nil
 }
 
-// shutdownPhase delivers the node-IPC 'shutdown' message and waits up to
-// kill_timeout for a self-exit (cluster reload handoff). Runs inside the
-// actor: blocking here is bounded and mirrors how stopTree blocks. The
-// child exit event stays queued — stopTree's cleanup makes the loop's
-// exitCh case a no-op afterwards.
-func (a *App) shutdownPhase() {
+// killTimeout is the configured graceful window, floored to the pinned PM2
+// default so a zero value never degrades to "no grace at all".
+func (a *App) killTimeout() time.Duration {
+	if a.cfg.KillTimeout > 0 {
+		return a.cfg.KillTimeout
+	}
+	return 1600 * time.Millisecond
+}
+
+// stopGraceful is the reload stop/delete kill path under ONE kill_timeout
+// budget shared by the node-IPC 'shutdown' handoff and the signal kill.
+//
+// The handoff only runs for cluster workers (a.ipcHandoff): those are the
+// only children that can read the frame. Previously every app waited the
+// full kill_timeout for the handoff AND the full kill_timeout again for
+// the signal — 2x the budget, and a straight waste of 1600ms per instance
+// for any app that never reads NODE_CHANNEL_FD (fork node, Bun, Python,
+// Go, shell scripts). A worker that exits on 'shutdown' still returns as
+// soon as h.Done fires; one that does not falls through to the signal
+// path with whatever budget remains.
+func (a *App) stopGraceful(gracefulIPC bool) error {
+	deadline := time.Now().Add(a.killTimeout())
+	if gracefulIPC && a.ipcHandoff {
+		a.shutdownHandoff(deadline)
+	}
+	return a.stopTreeUntil(deadline)
+}
+
+// shutdownHandoff delivers the node-IPC 'shutdown' message and waits for a
+// self-exit until deadline (cluster reload handoff). Runs inside the actor:
+// blocking here is bounded by the shared budget and mirrors how stopTree
+// blocks. The child exit event stays queued — stopTreeUntil's cleanup makes
+// the loop's exitCh case a no-op afterwards.
+func (a *App) shutdownHandoff(deadline time.Time) {
 	a.mu.Lock()
 	h := a.handle
-	timeout := a.cfg.KillTimeout
 	a.mu.Unlock()
 	if h == nil {
 		return
 	}
-	if timeout <= 0 {
-		timeout = 1600 * time.Millisecond
-	}
 	if err := h.SendShutdown(); err != nil {
 		return // no live channel: the kill path takes it from here
 	}
-	select {
-	case <-h.Done(): // app handled 'shutdown' and exited
-	case <-a.after(timeout): // fall through to the signal kill path
+	if wait := time.Until(deadline); wait > 0 {
+		select {
+		case <-h.Done(): // app handled 'shutdown' and exited
+		case <-a.after(wait): // budget elapsed: fall through to the signal kill
+		}
 	}
 }
 
@@ -481,9 +509,16 @@ func (a *App) onSignal(sig syscall.Signal) error {
 	return h.Signal(sig)
 }
 
-// stopTree runs the kill path on a live tree. status → stopping first so
-// concurrent snapshots observe the pinned vocabulary mid-flight.
+// stopTree runs the kill path on a live tree with the full kill_timeout
+// graceful window (the plain stop/restart path).
 func (a *App) stopTree() error {
+	return a.stopTreeUntil(time.Now().Add(a.killTimeout()))
+}
+
+// stopTreeUntil runs the kill path on a live tree with the graceful window
+// ending at deadline. status → stopping first so concurrent snapshots
+// observe the pinned vocabulary mid-flight.
+func (a *App) stopTreeUntil(deadline time.Time) error {
 	a.mu.Lock()
 	h := a.handle
 	if h != nil {
@@ -500,7 +535,7 @@ func (a *App) stopTree() error {
 		return nil
 	}
 
-	err := h.Stop()
+	err := h.StopWithin(deadline)
 	a.mu.Lock()
 	a.handle = nil
 	a.pid = 0
@@ -913,8 +948,10 @@ func (a *App) StopGraceful() error {
 	return <-reply
 }
 
-// DeleteGraceful is Delete with the cluster-reload handoff (see
-// StopGraceful). The App is unusable after.
+// DeleteGraceful is Delete with the reload handoff (see StopGraceful): the
+// handoff and the signal kill share ONE kill_timeout budget, and the IPC
+// 'shutdown' frame is only sent for cluster workers. The App is unusable
+// after.
 func (a *App) DeleteGraceful() error {
 	reply := make(chan error, 1)
 	a.mbox <- deleteMsg{reply: reply, gracefulIPC: true}
