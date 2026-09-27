@@ -95,6 +95,9 @@ Process control:
                             for cluster apps: new binds the shared port first,
                             old gets the 'shutdown' IPC handoff, then signals)
   gracefulReload <name|all> alias of reload
+  stop/restart/delete take --parallel N (-p N, default 1): concurrent
+                            per-app RPCs. reload stays sequential by design
+                            (zero-downtime + rollback).
   scale <name> <+N|-N|N>    adjust instance count (absolute target or delta)
   delete <name|id|all>      stop and forget (frees the pm_id)
 

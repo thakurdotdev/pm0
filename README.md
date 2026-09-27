@@ -121,7 +121,15 @@ pm0 startup                          # Install systemd service for auto-boot
 | `--watch` | | Auto-restart on file changes in current directory | `--watch` |
 | `--max-memory-restart` | | Auto-restart if memory exceeds limit | `--max-memory-restart 500M` |
 | `--env` | | Inject environment variable | `--env PORT=3000` |
+| `--parallel` | `-p` | `stop`/`restart`/`delete`: concurrent per-app RPCs. Default `1` = sequential (staggered downtime, ordered ids). `reload` stays sequential by design (zero-downtime + rollback). | `pm0 restart all --parallel 4` |
 | `--` | | Pass arguments directly to your script | `-- --port 8080` |
+
+Parallel restarts trade staggered downtime for speed: `pm0 restart all`
+restarts one app at a time (each port is empty for ~100ms in turn), while
+`pm0 restart all --parallel 4` restarts up to 4 at once (faster wall-clock,
+but all selected ports go down together and N runtimes booting at once
+spikes CPU/RSS on small boxes). Per-app semantics are unchanged either way
+(`SIGINT` -> `kill_timeout` -> `SIGKILL` through the actor mailbox).
 
 ---
 

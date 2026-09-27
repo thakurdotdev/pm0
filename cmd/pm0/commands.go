@@ -271,32 +271,51 @@ func statusWord(p *v1.ProcessInfo) string {
 }
 
 // cmdSelector drives stop/restart/reload/delete (same grammar).
+//
+// --parallel N (stop/restart/delete only, default 1 = sequential) fans out
+// one RPC per selected app — "all" is resolved to per-id selectors via List
+// first, so every RPC carries an explicit id. Parallel runs trade staggered
+// downtime for speed: all selected ports go down at once and 12x node boot
+// at once spikes CPU/RSS on small boxes. reload never takes this flag:
+// rolling replacements stay sequential to keep the port/rollback contract.
 func cmdSelector(args []string, kind string) {
 	fs := newFlagSet(kind)
 	updateEnv := fs.Bool("update-env", false, "restart: re-read the current shell environment")
+	parallel := fs.Int("parallel", 1, "stop/restart/delete: concurrent per-app RPCs (e.g. --parallel 4); reload stays sequential")
+	parallelShort := fs.Int("p", 1, "shorthand for --parallel")
 	flags, targets, _ := splitArgs(args, fs)
 	if err := fs.Parse(flags); err != nil {
 		os.Exit(2)
 	}
 	// --update-env is accepted only by restart (flagset grammar); stop /
 	// reload / delete reject it at Parse as an unknown flag already.
+	n := *parallel
+	if *parallelShort != 1 {
+		n = *parallelShort
+	}
+	if kind == "reload" && n != 1 {
+		fatalf("reload: --parallel is not supported (rolls stay sequential for zero-downtime + rollback)")
+	}
+	if n < 1 {
+		fatalf("%s: --parallel must be >= 1, got %d", kind, n)
+	}
 	c := mustDial()
 	sel := selector(targets)
 	opStart := time.Now()
 	var err error
 	switch kind {
 	case "stop":
-		_, err = c.Stop(sel)
+		_, err = c.StopN(sel, n)
 	case "restart":
 		upd := &v1.ProcessSpec{}
 		if *updateEnv {
 			upd.Env = environMap()
 		}
-		_, err = c.Restart(sel, upd)
+		_, err = c.RestartN(sel, upd, n)
 	case "reload":
 		_, err = c.Reload(sel)
 	case "delete":
-		_, err = c.Delete(sel)
+		_, err = c.DeleteN(sel, n)
 	}
 	if err != nil {
 		fatalf("%s: %v", kind, err)

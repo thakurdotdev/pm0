@@ -245,7 +245,8 @@ button { font-family: inherit; font-size: inherit; line-height: inherit; border:
 <span class="t-red">$</span> pm0 logs web --lines 100       <span class="t-dim"># Stream live logs with backlog</span>
 <span class="t-red">$</span> pm0 describe web               <span class="t-dim"># View uptime, RSS, and cgroup limits</span>
 <span class="t-red">$</span> pm0 scale web +2               <span class="t-dim"># Dynamically scale workers</span>
-<span class="t-red">$</span> pm0 reload web                 <span class="t-dim"># Zero-downtime rolling reload</span>
+<span class="t-red">$</span> pm0 reload web                 <span class="t-dim"># Zero-downtime rolling reload (always sequential)</span>
+<span class="t-red">$</span> pm0 restart web --parallel 4    <span class="t-dim"># Concurrent restarts (stop/delete take it too)</span>
 <span class="t-red">$</span> pm0 restart web | pm0 stop web | pm0 delete web</code></pre>
     </div>
 
@@ -259,11 +260,11 @@ button { font-family: inherit; font-size: inherit; line-height: inherit; border:
           </thead>
           <tbody>
             <tr><td><code>start &lt;script&gt;</code></td><td>—</td><td>Launch process or ecosystem config under supervisor</td></tr>
-            <tr><td><code>stop &lt;name|id|all&gt;</code></td><td>—</td><td>Gracefully terminate application process</td></tr>
-            <tr><td><code>restart &lt;name|id|all&gt;</code></td><td>—</td><td>Hard restart (SIGTERM followed by spawn)</td></tr>
-            <tr><td><code>reload &lt;name|id|all&gt;</code></td><td>—</td><td>Rolling zero-downtime reload for cluster workers</td></tr>
+            <tr><td><code>stop &lt;name|id|all&gt;</code></td><td>—</td><td>Gracefully terminate application process (<code>--parallel N</code> for concurrent stops)</td></tr>
+            <tr><td><code>restart &lt;name|id|all&gt;</code></td><td>—</td><td>Hard restart (SIGTERM followed by spawn; <code>--parallel N</code> for concurrent restarts)</td></tr>
+            <tr><td><code>reload &lt;name|id|all&gt;</code></td><td>—</td><td>Rolling zero-downtime reload for cluster workers (always sequential — no <code>--parallel</code>)</td></tr>
             <tr><td><code>scale &lt;name&gt; &lt;+N|-N|N&gt;</code></td><td>—</td><td>Add, remove, or set exact cluster worker count</td></tr>
-            <tr><td><code>delete &lt;name|id|all&gt;</code></td><td><code>del</code></td><td>Stop process and remove from supervisor registry</td></tr>
+            <tr><td><code>delete &lt;name|id|all&gt;</code></td><td><code>del</code></td><td>Stop process and remove from supervisor registry (<code>--parallel N</code> for concurrent deletes)</td></tr>
             <tr><td><code>status</code></td><td><code>ls, list</code></td><td>Print formatted tabular process overview</td></tr>
             <tr><td><code>jlist</code></td><td>—</td><td>Output PM2-compatible JSON array for monitoring tools</td></tr>
             <tr><td><code>logs &lt;name&gt;</code></td><td>—</td><td>Tail buffered ring logs and stream new events</td></tr>
@@ -294,11 +295,17 @@ button { font-family: inherit; font-size: inherit; line-height: inherit; border:
             <tr><td><code>--watch</code></td><td><code>-w</code></td><td>Restart automatically on source directory changes</td><td><code>--watch</code></td></tr>
             <tr><td><code>--max-memory-restart</code></td><td>—</td><td>Restart app if RSS exceeds threshold</td><td><code>--max-memory-restart 512M</code></td></tr>
             <tr><td><code>--env</code></td><td>—</td><td>Inject environment variable (repeatable)</td><td><code>--env PORT=3000</code></td></tr>
+            <tr><td><code>--parallel</code></td><td><code>-p</code></td><td><code>stop</code>/<code>restart</code>/<code>delete</code>: concurrent per-app RPCs (default <code>1</code> = sequential). <code>reload</code> stays sequential by design</td><td><code>pm0 restart all --parallel 4</code></td></tr>
             <tr><td><code>--</code></td><td>—</td><td>Pass remaining arguments straight to script</td><td><code>pm0 start app.js -- --port 8080</code></td></tr>
           </tbody>
         </table>
       </div>
     </div>
+    <p>
+      Default <span class="code-chip">pm0 restart all</span> restarts one app at a time (each port is briefly empty in turn — staggered downtime, ordered ids).
+      <span class="code-chip">pm0 restart all --parallel 4</span> restarts up to 4 at once: faster wall-clock, but all selected ports go down together and N runtimes
+      booting at once spikes CPU/RSS on small boxes. Per-app semantics are unchanged either way (<span class="code-chip">SIGINT</span> → <span class="code-chip">kill_timeout</span> → <span class="code-chip">SIGKILL</span>).
+    </p>
 
     <!-- Cluster Mode -->
     <h2 id="cluster">Zero-Downtime Cluster Mode</h2>
