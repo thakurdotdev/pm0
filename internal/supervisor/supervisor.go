@@ -437,18 +437,30 @@ func (s *Supervisor) reloadOne(id int) (err error) {
 	}
 	cfg := old.Config()
 	prevRestarts := old.Snapshot().RestartTime
+	// Construct before parking, and publish the replacement atomically with
+	// the park. No concurrent start can claim the temporarily empty slot.
+	replacement, buildErr := machine.New(cfg, s.launcher, machine.Options{
+		ID:                 id,
+		InitialRestarts:    prevRestarts + 1,
+		ClusterPreloadPath: s.clusterPreloadPath(),
+	})
+	if buildErr != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("build replacement: %w", buildErr)
+	}
 	s.apps[parkKey(id)] = old
-	delete(s.apps, id)
-	delete(s.serials, id)
+	s.serials[parkKey(id)] = s.serials[id]
+	s.apps[id] = replacement
+	s.assignSerialLocked(id)
 	s.bumpVersionLocked()
+	replStart = time.Now()
+	startErr := replacement.Start()
 	s.mu.Unlock()
 
 	// Replacement at the same pm_id (PM2 reuses the id; the old worker
 	// rides the _old_ slot until it is retired).
-	replStart = time.Now()
-	if err := s.StartReplacementAt(cfg, id, prevRestarts+1); err != nil {
-		s.unpark(id, old)
-		return fmt.Errorf("start replacement: %w", err)
+	if startErr != nil {
+		return errors.Join(fmt.Errorf("start replacement: %w", startErr), s.rollbackReload(id, old, replacement))
 	}
 
 	// Stability gate. PM2 waits for the cluster 'listening' event up to
@@ -470,12 +482,10 @@ func (s *Supervisor) reloadOne(id int) (err error) {
 		s.mu.Lock()
 		app := s.apps[id]
 		s.mu.Unlock()
-		if app == nil {
-			// The replacement was deleted under us (user delete during
-			// the roll) — restore the old out of courtesy; the user asked
-			// for deletion, so if the id is taken again just drop the old.
-			s.unpark(id, old)
-			return fmt.Errorf("replacement deleted mid-roll")
+		if app != replacement {
+			// A user deleted/replaced the slot during the roll. Honor that
+			// mutation and retire the parked worker instead of resurrecting it.
+			return errors.Join(fmt.Errorf("replacement changed mid-roll"), s.retireParked(id, old))
 		}
 		snap := app.Snapshot()
 		switch snap.Status {
@@ -487,14 +497,10 @@ func (s *Supervisor) reloadOne(id int) (err error) {
 		case machine.StatusErrored, machine.StatusStopped:
 			// The replacement died and its policy parked it: restore the
 			// old (which never stopped serving).
-			_ = s.Delete(strconv.Itoa(id))
-			s.unpark(id, old)
-			return fmt.Errorf("replacement exited (%s)", snap.Status)
+			return errors.Join(fmt.Errorf("replacement exited (%s)", snap.Status), s.rollbackReload(id, old, replacement))
 		}
 		if time.Since(start) > deadline {
-			_ = s.Delete(strconv.Itoa(id))
-			s.unpark(id, old)
-			return fmt.Errorf("replacement not stable within listen_timeout")
+			return errors.Join(fmt.Errorf("replacement not stable within listen_timeout"), s.rollbackReload(id, old, replacement))
 		}
 	}
 }
@@ -530,18 +536,21 @@ func (s *Supervisor) retireParked(id int, old *machine.App) error {
 	return err
 }
 
-// unpark restores a parked old incarnation to its pm_id (PM2
-// unparkOldWorker). The slot must be free (the failed replacement was
-// deleted first); if another start took the id meanwhile, the old
-// incarnation is simply discarded from the registry.
-func (s *Supervisor) unpark(id int, old *machine.App) {
+// rollbackReload deletes only this roll's replacement and restores the old
+// incarnation and registration serial under the same lock. If a user already
+// changed the slot, leave its successor alone and retire the parked worker.
+func (s *Supervisor) rollbackReload(id int, old, replacement *machine.App) error {
 	s.mu.Lock()
-	if _, taken := s.apps[id]; !taken {
-		s.apps[id] = old
-		s.assignSerialLocked(id)
+	if s.apps[id] != replacement {
+		s.mu.Unlock()
+		return s.retireParked(id, old)
 	}
+	err := replacement.Delete()
+	s.apps[id] = old
+	s.serials[id] = s.serials[parkKey(id)]
 	delete(s.apps, parkKey(id))
 	delete(s.serials, parkKey(id))
 	s.bumpVersionLocked()
 	s.mu.Unlock()
+	return err
 }

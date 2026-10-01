@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/pm0/pm0/internal/config"
@@ -34,6 +36,9 @@ const (
 	LogsDir    = "logs"
 	PidsDir    = "pids"
 	DaemonLog  = "daemon.log"
+	// ConfigName is the optional KEY=VALUE daemon settings file (see
+	// ConfigValue).
+	ConfigName = "config"
 	// PidName is the daemon's own pidfile ("<pid> <starttime>"). pm0
 	// extension: the control-socket takeover reads it to prove the
 	// previous daemon died, skipping the stale-socket grace.
@@ -57,6 +62,33 @@ func SocketPath() string    { return filepath.Join(Home(), SocketName) }
 func DumpPath() string      { return filepath.Join(Home(), DumpName) }
 func DaemonLogPath() string { return filepath.Join(Home(), DaemonLog) }
 func PidPath() string       { return filepath.Join(Home(), PidName) }
+
+// ConfigPath is the optional daemon config file: KEY=VALUE lines (one per
+// line, '#' comments). It lets the installer persist settings (for example the
+// HTTP API address) without editing a shell profile, so the choice survives
+// restarts, systemd, and CLI auto-spawn alike.
+func ConfigPath() string { return filepath.Join(Home(), ConfigName) }
+
+// ConfigValue returns the value for key from $PM0_HOME/config, or "" when the
+// file is missing or the key is absent. Surrounding quotes are stripped.
+func ConfigValue(key string) string {
+	b, err := os.ReadFile(ConfigPath())
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(k) != key {
+			continue
+		}
+		return strings.Trim(strings.TrimSpace(v), `"'`)
+	}
+	return ""
+}
 
 // EnsureHome creates the directory layout. Idempotent.
 func EnsureHome() error {
@@ -160,10 +192,14 @@ type dumpFile struct {
 	Apps      []appRecord `json:"apps"`
 }
 
-// Save writes the dump atomically (temp file in the same dir + rename,
+var saveMu sync.Mutex
+
+// Save writes the dump atomically (unique temp file in the same dir + rename,
 // invariant I4) and fsyncs before renaming so a power cut cannot leave a
 // truncated dump behind.
 func Save(d Dump) error {
+	saveMu.Lock()
+	defer saveMu.Unlock()
 	if err := EnsureHome(); err != nil {
 		return err
 	}
@@ -182,11 +218,12 @@ func Save(d Dump) error {
 	data = append(data, '\n')
 
 	path := DumpPath()
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	f, err := os.CreateTemp(filepath.Dir(path), DumpName+".*.tmp")
 	if err != nil {
-		return fmt.Errorf("store: open %s: %w", tmp, err)
+		return fmt.Errorf("store: create temporary dump: %w", err)
 	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
 	if _, err = f.Write(data); err == nil {
 		err = f.Sync()
 	}
@@ -200,6 +237,14 @@ func Save(d Dump) error {
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("store: rename dump: %w", err)
+	}
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("store: open dump directory: %w", err)
+	}
+	defer dir.Close()
+	if err := dir.Sync(); err != nil {
+		return fmt.Errorf("store: sync dump directory: %w", err)
 	}
 	return nil
 }

@@ -38,6 +38,9 @@ func TestMain(m *testing.M) {
 	defer cleanup()
 	fakechild = bin
 	harness.SetFakechildPath(bin)
+	// Keep the HTTP API off during tests so the in-process test servers never
+	// contend for (or depend on) a real host port.
+	os.Setenv("PM0_HTTP_ADDR", "off")
 	os.Exit(m.Run())
 }
 

@@ -46,8 +46,12 @@ func TestJsExtensionResolvesNode(t *testing.T) {
 	if effective != "node" {
 		t.Fatalf("effective = %q, want node", effective)
 	}
-	if execPath != "node" {
-		t.Errorf("execPath = %q, want node", execPath)
+	wantBin, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if execPath != wantBin || !filepath.IsAbs(execPath) {
+		t.Errorf("execPath = %q, want absolute %q", execPath, wantBin)
 	}
 	// Script must ride as first arg after interpreter args (row 3/5).
 	want := []string{"--harmony", script}
@@ -66,7 +70,11 @@ func TestExplicitInterpreter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveInterpreter: %v", err)
 	}
-	if effective != "python3" || execPath != "python3" {
+	wantBin, err := exec.LookPath("python3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if effective != "python3" || execPath != wantBin || !filepath.IsAbs(execPath) {
 		t.Errorf("effective=%q execPath=%q", effective, execPath)
 	}
 	if len(execArgs) != 1 || execArgs[0] != script {

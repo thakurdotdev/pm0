@@ -1,13 +1,62 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/pm0/pm0/internal/config"
 )
+
+func TestConcurrentSavePublishesCompleteSnapshots(t *testing.T) {
+	testHome(t)
+	if err := Save(Dump{Apps: []Entry{sampleEntry(0, "initial")}}); err != nil {
+		t.Fatal(err)
+	}
+	const writers = 24
+	errs := make(chan error, writers+1)
+	done := make(chan struct{})
+	var readers sync.WaitGroup
+	readers.Go(func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			d, ok, err := Load()
+			if err != nil || !ok || len(d.Apps) != 1 || d.Apps[0].App.Env["K"] != "v" {
+				errs <- fmt.Errorf("incomplete concurrent snapshot: ok=%v err=%v dump=%+v", ok, err, d)
+				return
+			}
+		}
+	})
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Go(func() {
+			entry := sampleEntry(i, fmt.Sprintf("writer-%d", i))
+			entry.App.Args = []string{strings.Repeat("x", 8192+i)}
+			if err := Save(Dump{Apps: []Entry{entry}}); err != nil {
+				errs <- err
+			}
+		})
+	}
+	wg.Wait()
+	close(done)
+	readers.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	files, err := filepath.Glob(filepath.Join(Home(), "*.tmp"))
+	if err != nil || len(files) != 0 {
+		t.Fatalf("temporary dumps remain: %v, %v", files, err)
+	}
+}
 
 func testHome(t *testing.T) {
 	t.Helper()

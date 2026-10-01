@@ -123,6 +123,19 @@ func (s *Server) Run() error {
 		}()
 	}
 
+	// Opt-in local HTTP/REST API: a JSON surface over the same control-plane
+	// methods, for dashboards and co-located backend services. OFF unless
+	// PM0_HTTP_ADDR (env) or $PM0_HOME/config sets it; bind locally. Started
+	// best-effort — a bind failure (e.g. the port is taken) must never stop
+	// the daemon. See docs/http-api.md.
+	if addr, on := httpAPIAddr(); on {
+		go func() {
+			if err := s.serveHTTP(addr); err != nil {
+				fmt.Printf("pm0 daemon: http api on %s: %v\n", addr, err)
+			}
+		}()
+	}
+
 	// Verdict on the PREVIOUS owner BEFORE this boot clobbers the record:
 	// writePidFile below replaces the file with OUR live identity, and the
 	// takeover loop must not read its own record back as "the owner is

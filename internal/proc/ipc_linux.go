@@ -41,7 +41,6 @@ const (
 // ipcChannel is the parent side of one child IPC channel.
 type ipcChannel struct {
 	parent *os.File    // parent-end socket (read side)
-	fd     int         // parent-end raw fd, captured once (see close)
 	closed atomic.Bool // close() is idempotent (Stop and Launch error paths)
 	// ready closes exactly once, when the child sends the string "ready"
 	// (the wait_ready gate, row 19). nil-safe via Handle.Ready().
@@ -75,7 +74,6 @@ func newIPCChannel() (*ipcChannel, *os.File, error) {
 	}
 	c := &ipcChannel{
 		parent: os.NewFile(uintptr(fds[0]), "pm0-ipc-parent"),
-		fd:     fds[0],
 		ready:  make(chan struct{}),
 		done:   make(chan struct{}),
 	}
@@ -84,11 +82,11 @@ func newIPCChannel() (*ipcChannel, *os.File, error) {
 }
 
 // pump drains frames until EOF. Run once, in its own goroutine. A blocked
-// read is released by close() (shutdown) or by the child side closing on
+// read is released by close() or by the child side closing on
 // tree death — the goroutine never outlives the channel for long.
 func (c *ipcChannel) pump() {
 	defer func() {
-		_ = c.parent.Close()
+		c.close()
 		close(c.done)
 	}()
 	r := bufio.NewReaderSize(c.parent, 8192)
@@ -107,18 +105,14 @@ func (c *ipcChannel) pump() {
 	}
 }
 
-// close releases the parent end (best effort, idempotent). shutdown(SHUT_RD)
-// first so a blocked pump read returns immediately even if Close alone
-// would not wake it; then Close unblocks it definitively. The raw fd is
-// captured at creation — calling parent.Fd() here would race the pump's
-// concurrent reads/Close (os.File.fd is not synchronized); a stale fd
-// number after Close is harmless because the shutdown runs at most once
-// and EBADF is ignored.
+// close releases the pollable parent file and wakes blocked reads. All
+// cleanup, including pump EOF, goes through this path. Never issue syscalls
+// on a saved raw descriptor: the kernel can reuse it as soon as EOF cleanup
+// closes the file.
 func (c *ipcChannel) close() {
-	if c.closed.CompareAndSwap(false, true) && c.fd >= 0 {
-		_ = unix.Shutdown(c.fd, unix.SHUT_RD)
+	if c.closed.CompareAndSwap(false, true) {
+		_ = c.parent.Close()
 	}
-	_ = c.parent.Close()
 }
 
 // sendMsg writes one newline-delimited JSON frame to the child — the

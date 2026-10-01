@@ -306,6 +306,54 @@ if [ "$installed" = 0 ]; then
   status_line "Installing:" "source build (${go_ver}) → ${target_display}"
 fi
 
+# --- optional: local HTTP API -------------------------------------------------
+
+# OFF by default. Ask once (only on an interactive terminal) and, if the user
+# opts in, persist the choice in $PM0_HOME/config so it survives restarts,
+# systemd and CLI auto-spawn — no shell-profile edit. Automation can pre-answer
+# by exporting PM0_HTTP_ADDR (an address, or "off") or PM0_HTTP=1|0, which
+# skips the prompt. The daemon reads the env var first, then the config file.
+http_choice=""
+http_write=0
+if [ -n "${PM0_HTTP_ADDR:-}" ]; then
+  http_choice="$PM0_HTTP_ADDR"          # user manages it via env; leave config alone
+elif [ -n "${PM0_HTTP:-}" ]; then
+  http_write=1
+  case "$(printf %s "$PM0_HTTP" | tr '[:upper:]' '[:lower:]')" in
+    1|y|yes|true|on) http_choice="127.0.0.1:9615" ;;
+    *)               http_choice="off" ;;
+  esac
+elif : < /dev/tty 2>/dev/null; then
+  # Interactive terminal available. Read from the TTY itself, NOT stdin:
+  # `curl | bash` feeds this script on stdin.
+  http_write=1
+  printf "\n  ${BOLD}Local HTTP API${RESET} ${DIM}(optional; JSON API for dashboards, loopback only)${RESET}\n"
+  printf "  Enable on ${BOLD}127.0.0.1:9615${RESET}? [y/N] "
+  http_ans=""
+  read -r http_ans < /dev/tty 2>/dev/null || http_ans=""
+  case "$http_ans" in
+    [Yy]|[Yy][Ee][Ss]) http_choice="127.0.0.1:9615" ;;
+    *)                  http_choice="off" ;;
+  esac
+fi
+
+if [ "$http_write" = 1 ] && [ -n "$http_choice" ] && [ "$http_choice" != "off" ]; then
+  cfg_home="${PM0_HOME:-$HOME/.pm0}"
+  cfg_file="$cfg_home/config"
+  if mkdir -p "$cfg_home" 2>/dev/null; then
+    tmp_file="${cfg_file}.tmp.$$"
+    grep -v '^PM0_HTTP_ADDR=' "$cfg_file" > "$tmp_file" 2>/dev/null || : > "$tmp_file"
+    printf 'PM0_HTTP_ADDR=%s\n' "$http_choice" >> "$tmp_file"
+    mv "$tmp_file" "$cfg_file" 2>/dev/null || rm -f "$tmp_file"
+  fi
+fi
+
+if [ -n "$http_choice" ] && [ "$http_choice" != "off" ]; then
+  status_line "HTTP API:" "enabled on ${BOLD}${http_choice}${RESET}"
+else
+  status_line "HTTP API:" "disabled (enable: PM0_HTTP_ADDR=127.0.0.1:9615)"
+fi
+
 # --- live reload if active daemon exists --------------------------------------
 
 if [ -n "$daemon_pid" ]; then

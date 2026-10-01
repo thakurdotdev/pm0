@@ -47,6 +47,9 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	pm0Bin = bin
+	// Keep the HTTP API off for golden runs (spawned daemons inherit this
+	// env) so they never bind a real host port.
+	os.Setenv("PM0_HTTP_ADDR", "off")
 	os.Exit(m.Run())
 }
 

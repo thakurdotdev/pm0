@@ -111,6 +111,29 @@ pm0 startup                          # Install systemd service for auto-boot
 
 ---
 
+## HTTP API (opt-in)
+
+pm0 can expose a local JSON/REST control plane for dashboards and co-located
+backend services — list processes with full PM2-compatible data, and act on
+them (start, stop, restart, reload, delete, scale, stream logs over SSE).
+
+Off by default. Enable it with `PM0_HTTP_ADDR` (`host:port` or `unix:/path`),
+with `pm0 daemon --http-addr`, or by answering "yes" to the installer prompt
+(which writes `$PM0_HOME/config`):
+
+```sh
+PM0_HTTP_ADDR=127.0.0.1:9615 pm0 daemon
+
+curl -s http://127.0.0.1:9615/api/v1/processes
+curl -s -X POST http://127.0.0.1:9615/api/v1/processes/web/restart
+```
+
+It has no authentication of its own and is meant to be bound to loopback (or a
+Unix socket) only — your own backend terminates auth and re-exposes it. Full
+contract: [`docs/http-api.md`](docs/http-api.md).
+
+---
+
 ## Common Flags
 
 | Flag | Shorthand | Description | Example |
@@ -173,7 +196,7 @@ Tested under identical workloads (2 vCPU / 3.9 GB Linux environment):
 | Cluster `-i 2` throughput | 25.8k req/s | **27.3k req/s** | **Higher throughput** |
 | 1,200 restart ops | 238 ms / 290 s | **6.5 ms / 9.3 s** | **37x faster** |
 | Sustained 100 MB/s log flood | 20.2% CPU | **5.7% CPU** | **3.6x less CPU** |
-| Log rotation | Module required | **Built-in** | **Zero lost lines** |
+| Log rotation | Module required | **Built-in** | **Size-based copytruncate** |
 
 ---
 

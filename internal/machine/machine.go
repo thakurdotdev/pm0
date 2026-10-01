@@ -537,14 +537,14 @@ func (a *App) stopTreeUntil(deadline time.Time) error {
 
 	err := h.StopWithin(deadline)
 	a.mu.Lock()
-	a.handle = nil
-	a.pid = 0
-	a.publishTreeLocked(nil)
 	if err != nil {
 		// Kill path failed with survivors (I1 violation reported by proc).
-		// Truthful status: errored, and surface the error.
+		// Retain the handle so a subsequent stop can retry the surviving tree.
 		a.status = StatusErrored
 	} else {
+		a.handle = nil
+		a.pid = 0
+		a.publishTreeLocked(nil)
 		a.status = StatusStopped
 		recordExitLocked(a, h)
 	}
@@ -740,10 +740,24 @@ func (a *App) onExit() {
 		return
 	}
 	info := h.ExitResult()
-	a.handle = nil
+	st := a.status
+	if st != StatusLaunching && st != StatusOnline {
+		a.mu.Unlock()
+		return
+	}
+	// The leader's exit does not imply its descendants exited. Keep tree
+	// ownership until force cleanup completes, before parking or relaunching.
+	now := a.now()
+	a.status = StatusStopping
 	a.pid = 0
-	a.publishTreeLocked(nil)
 	a.readyTimer = nil // stale gate deadline never fires into the next run
+	a.mu.Unlock()
+	cleanupErr := h.StopWithin(time.Now())
+	a.mu.Lock()
+	if cleanupErr == nil {
+		a.handle = nil
+		a.publishTreeLocked(nil)
+	}
 	// Observed pm2: exit_code = code || 0 — signal deaths record 0, not
 	// null (null appears only while running / before any exit).
 	code := info.ExitCode
@@ -759,15 +773,13 @@ func (a *App) onExit() {
 		a.exitReason = ""
 	}
 	a.exitCode = &code
-	st := a.status
+	if cleanupErr != nil {
+		a.status = StatusErrored
+	}
 	a.mu.Unlock()
-
-	// Late deliveries after a stop path already handled the tree.
-	if st != StatusLaunching && st != StatusOnline {
+	if cleanupErr != nil {
 		return
 	}
-
-	now := a.now()
 
 	// Intentional stops (observed pm2 stopping condition): autorestart off,
 	// or an exit code listed in stop_exit_codes. Park stopped.

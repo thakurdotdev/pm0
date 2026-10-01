@@ -72,10 +72,11 @@ func detectUncached() Detection {
 		if d.Mode != ModePgid {
 			root := os.Getenv("PM0_CGROUP_ROOT")
 			if root == "" {
-				root = d.CgroupPath
+				root, _ = cgroupFilesystemPath(d.CgroupPath)
 			}
-			d.CgroupRoot, d.CgroupUsable = probeCgroupRoot(root)
-			d.CgroupUsable = true // forced: paths will surface real errors
+			if root != "" {
+				d.CgroupRoot, d.CgroupUsable = probeCgroupRoot(root)
+			}
 		}
 		return d
 	}
@@ -83,16 +84,24 @@ func detectUncached() Detection {
 	ok, path, err := ownCgroup()
 	d.CgroupV2 = ok
 	d.CgroupPath = path
+	if err != nil {
+		d.Warning = "cgroup hierarchy unreadable: " + err.Error()
+		return d
+	}
 	if !ok {
 		d.Warning = "no cgroup v2 unified hierarchy (cgroup v1 or none); using pgid fallback"
 		return d
 	}
-	if err != nil {
-		d.Warning = "cgroup v2 present but unreadable: " + err.Error()
-		return d
-	}
 
-	root, usable := probeCgroupRoot(path)
+	root := os.Getenv("PM0_CGROUP_ROOT")
+	if root == "" {
+		root, err = cgroupFilesystemPath(path)
+		if err != nil {
+			d.Warning = "cannot resolve cgroup v2 mount: " + err.Error() + "; using pgid fallback"
+			return d
+		}
+	}
+	root, usable := probeCgroupRoot(root)
 	d.CgroupRoot = root
 	d.CgroupUsable = usable
 	if !usable {
@@ -115,6 +124,46 @@ func detectUncached() Detection {
 		d.Warning = fmt.Sprintf("kernel %d.%d lacks cgroup v2 freezer (needs 5.2); using pgid fallback", major, minor)
 	}
 	return d
+}
+
+// /proc/*/cgroup paths are hierarchy-relative, not filesystem paths. Resolve
+// against the cgroup2 mount and its mount root (including subtree mounts).
+func cgroupFilesystemPath(path string) (string, error) {
+	data, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return "", err
+	}
+	return resolveCgroupMount(path, string(data))
+}
+
+func resolveCgroupMount(path, mountinfo string) (string, error) {
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("invalid cgroup path %q", path)
+	}
+	for _, part := range strings.Split(path, "/") {
+		if part == ".." {
+			return "", fmt.Errorf("invalid cgroup path %q", path)
+		}
+	}
+	unescape := strings.NewReplacer(`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, `\`)
+	for _, line := range strings.Split(mountinfo, "\n") {
+		before, after, ok := strings.Cut(line, " - ")
+		fields, fs := strings.Fields(before), strings.Fields(after)
+		if !ok || len(fields) < 5 || len(fs) < 1 || fs[0] != "cgroup2" {
+			continue
+		}
+		root, mount := unescape.Replace(fields[3]), unescape.Replace(fields[4])
+		rel, err := filepath.Rel(root, path)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
+			return filepath.Join(mount, rel), nil
+		}
+		// A cgroup namespace may report its own root as / even when the
+		// mountinfo root names the corresponding host subtree.
+		if path == "/" {
+			return mount, nil
+		}
+	}
+	return "", fmt.Errorf("no cgroup2 mount contains %q", path)
 }
 
 // ownCgroup parses /proc/self/cgroup for the unified `0::<path>` entry.

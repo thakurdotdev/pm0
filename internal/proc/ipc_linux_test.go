@@ -3,9 +3,73 @@
 package proc
 
 import (
+	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
+
+func TestIPCCleanupAfterEOFDoesNotShutdownReusedFD(t *testing.T) {
+	c, child, err := newIPCChannel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := c.parent.SyscallConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var oldFD int
+	if err := raw.Control(func(fd uintptr) { oldFD = int(fd) }); err != nil {
+		t.Fatal(err)
+	}
+	go c.pump()
+	_ = child.Close()
+	select {
+	case <-c.done:
+	case <-time.After(time.Second):
+		t.Fatal("pump did not exit after EOF")
+	}
+	if !c.closed.Load() {
+		t.Fatal("EOF cleanup did not retire descriptor ownership")
+	}
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(fds[0])
+	defer unix.Close(fds[1])
+	if fds[0] != oldFD && fds[1] != oldFD {
+		t.Logf("IPC fd %d was reused elsewhere; checking cleanup leaves new sockets intact", oldFD)
+	}
+	c.close()
+	if _, err := unix.Write(fds[1], []byte("x")); err != nil {
+		t.Fatalf("unrelated socket was shut down: %v", err)
+	}
+	buf := make([]byte, 1)
+	if n, err := unix.Read(fds[0], buf); err != nil || n != 1 || buf[0] != 'x' {
+		t.Fatalf("unrelated socket read = %d, %v, %q", n, err, buf)
+	}
+}
+
+func TestIPCConcurrentCloseReleasesBlockedPump(t *testing.T) {
+	c, child, err := newIPCChannel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer child.Close()
+	go c.pump()
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Go(c.close)
+	}
+	wg.Wait()
+	select {
+	case <-c.done:
+	case <-time.After(time.Second):
+		t.Fatal("close did not release the blocked IPC pump")
+	}
+}
 
 func TestIsReadyMessage(t *testing.T) {
 	yes := []string{

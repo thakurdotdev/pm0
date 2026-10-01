@@ -23,6 +23,7 @@
 package daemon
 
 import (
+	"context"
 	"io"
 	"os"
 	"sync"
@@ -99,24 +100,32 @@ func (s *Server) StreamLogs(req *v1.StreamLogsRequest, stream v1.Daemon_StreamLo
 					errs = errs[len(errs)-n:]
 				}
 				for _, e := range outs {
-					_ = stream.Send(logLine(b.view, false, e.Data))
+					if err := stream.Send(logLine(b.view, false, e.Data)); err != nil {
+						return err
+					}
 				}
 				for _, e := range errs {
-					_ = stream.Send(logLine(b.view, true, e.Data))
+					if err := stream.Send(logLine(b.view, true, e.Data)); err != nil {
+						return err
+					}
 				}
 				continue
 			}
 			// File fallback (no sinks => no route; M2 behavior).
 			if lines, off, ok := tailFile(b.view.Config.OutFile, n); ok {
 				for _, line := range lines {
-					_ = stream.Send(logLine(b.view, false, line))
+					if err := stream.Send(logLine(b.view, false, line)); err != nil {
+						return err
+					}
 				}
 				fbOffsets[offsetKey{id: b.view.ID}] = off
 			}
 			if stderrWanted {
 				if lines, off, ok := tailFile(b.view.Config.ErrorFile, n); ok {
 					for _, line := range lines {
-						_ = stream.Send(logLine(b.view, true, line))
+						if err := stream.Send(logLine(b.view, true, line)); err != nil {
+							return err
+						}
 					}
 					fbOffsets[offsetKey{id: b.view.ID, stderr: true}] = off
 				}
@@ -130,7 +139,8 @@ func (s *Server) StreamLogs(req *v1.StreamLogsRequest, stream v1.Daemon_StreamLo
 
 	// Follow phase: per-app forwarders feed one merged channel; a single
 	// sender goroutine owns the stream (grpc streams are single-writer).
-	ctx := stream.Context()
+	ctx, cancel := context.WithCancel(stream.Context())
+	defer cancel()
 	merged := make(chan *v1.LogLine, 256)
 	var wg sync.WaitGroup
 
@@ -149,7 +159,7 @@ func (s *Server) StreamLogs(req *v1.StreamLogsRequest, stream v1.Daemon_StreamLo
 						if !ok {
 							return // route closed (app deleted mid-stream)
 						}
-						if e.Seq <= maxSeq {
+						if e.Dropped == 0 && e.Seq <= maxSeq {
 							continue // already delivered by the backlog phase
 						}
 						if e.Stream == logbus.Stderr && !stderrWanted {

@@ -184,18 +184,18 @@ func hasShebang(path string) (string, bool) {
 }
 
 // lookPath resolves an interpreter to an absolute path: existing file, or
-// PATH lookup. Bare names that PATH resolves stay bare (the kernel will
-// look them up at exec time too — keeping them bare avoids pinning a
-// version the user may have meant loosely); missing names error now.
+// PATH lookup. Pin PATH-resolved names too: the cgroup wrapper executes via
+// syscall.Exec, which does not search PATH.
 func lookPath(interp string) (string, error) {
 	if strings.ContainsRune(interp, '/') {
 		if _, err := os.Stat(interp); err != nil {
 			return "", fmt.Errorf("interpreter %s: %w", interp, err)
 		}
-		return filepath.Clean(interp), nil
+		return filepath.Abs(interp)
 	}
-	if _, err := exec.LookPath(interp); err != nil {
+	bin, err := exec.LookPath(interp)
+	if err != nil {
 		return "", fmt.Errorf("interpreter %q not found in PATH (set interpreter: none to exec the script directly)", interp)
 	}
-	return interp, nil
+	return filepath.Abs(bin)
 }

@@ -65,6 +65,9 @@ type Entry struct {
 	At     time.Time
 	Data   string
 	Seq    uint64
+	// Dropped distinguishes subscriber control messages from ring entries.
+	// They must not be suppressed by backlog sequence deduplication.
+	Dropped int
 }
 
 // Defaults applied when Options fields are zero. Ring bounds follow the
@@ -427,9 +430,11 @@ func (r *Route) fanout(e Entry) {
 		// line, report the gap. Skipped while the channel is still full.
 		if n := s.pending[e.Stream]; n > 0 {
 			marker := Entry{
-				Stream: e.Stream,
-				At:     time.Now(),
-				Data:   fmt.Sprintf(dropMarkerFormat, n, e.Stream.Label()),
+				Stream:  e.Stream,
+				At:      time.Now(),
+				Data:    fmt.Sprintf(dropMarkerFormat, n, e.Stream.Label()),
+				Seq:     e.Seq,
+				Dropped: n,
 			}
 			select {
 			case s.ch <- marker:
@@ -474,6 +479,7 @@ func (r *Route) pump(path string, st Stream) {
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	var offset int64
+	var carry []byte // incomplete line moved out of a rotated file
 	idleTicks := 0
 	// Reused read buffer + line slice: at a 100MB/s flood every base
 	// cadence tick reads ~10MB — io.ReadAll's grow-from-512B doubling
@@ -529,29 +535,40 @@ func (r *Route) pump(path string, st Stream) {
 				r.Clear()
 			}
 		}
+		capturePath := path
+		var archive string
 		if r.opts.RotateMaxBytes > 0 && stt.Size() >= r.opts.RotateMaxBytes {
-			if r.rotateIfDue(path) {
+			archive = r.rotateIfDue(path)
+		}
+		if archive != "" {
+			// Read the immutable copy, including appends caught by rotation,
+			// before pruning. Reading the truncated live file loses the batch.
+			capturePath = archive
+			stt, err = os.Stat(archive)
+			if err != nil {
 				offset = 0
-				snapBack()
+				continue
 			}
 		}
-		if stt.Size() == offset {
+		if archive == "" && stt.Size() == offset {
 			// Fully drained and no growth since the last look.
 			backoff()
 			continue
 		}
-		if skip := stt.Size() - offset; skip > maxBatchBytes {
+		if skip := stt.Size() - offset; skip > int64(maxBatchBytes-len(carry)) {
 			// Counted head-skip past the batch cap (see the
 			// maxBatchBytes contract): report in whole MiB so n
 			// stays a sane int even for multi-TB growth.
 			r.notify("skipped", st, int(skip>>20))
 			offset = stt.Size() - maxBatchBytes
+			carry = nil // skipped bytes break any pending partial line
 		}
 		snapBack()
 		var noff int64
 		var lines []string
+		var partial []byte
 		var rerr error
-		noff, lines, buf, rerr = readNewInto(path, offset, buf)
+		noff, lines, buf, partial, rerr = readNewIntoPrefix(capturePath, offset, buf, carry)
 		if rerr != nil {
 			offset = 0 // vanished between the stat and the open
 			continue
@@ -559,29 +576,44 @@ func (r *Route) pump(path string, st Stream) {
 		offset = noff
 		if len(lines) > 0 {
 			r.appendLines(lines, st, time.Now())
+			carry = nil // the carried prefix was consumed by the first line
+		}
+		if archive != "" {
+			// The partial bytes no longer exist in the live file. Carry a
+			// bounded prefix across rotation and wait for the next newline.
+			if len(partial) > r.opts.MaxLineBytes {
+				partial = partial[:r.opts.MaxLineBytes]
+				r.mu.Lock()
+				r.truncated++
+				r.mu.Unlock()
+				r.notify("truncated", st, 1)
+			}
+			carry = append(carry[:0], partial...)
+			offset = 0
+			r.mu.Lock()
+			r.rotations++
+			r.mu.Unlock()
+			PruneRotated(path, r.opts.RotateRetain)
 		}
 	}
 }
 
 // rotateIfDue performs one copytruncate rotation when the sink exceeds
-// RotateMaxBytes, then enforces the retain cap. Returns true when the
-// file was truncated (the pump's offset resets to zero).
-func (r *Route) rotateIfDue(path string) bool {
+// RotateMaxBytes. The returned archive remains available until the pump has
+// captured it; only then may retention pruning remove it.
+func (r *Route) rotateIfDue(path string) string {
 	if r.opts.RotateMaxBytes <= 0 {
-		return false
+		return ""
 	}
 	st, err := os.Stat(path)
 	if err != nil || st.Size() < r.opts.RotateMaxBytes {
-		return false
+		return ""
 	}
-	if err := CopyTruncate(path); err != nil {
-		return false // keep tailing; retry next tick
+	archive, err := copyTruncate(path)
+	if err != nil {
+		return "" // keep tailing; retry next tick
 	}
-	r.mu.Lock()
-	r.rotations++
-	r.mu.Unlock()
-	PruneRotated(path, r.opts.RotateRetain)
-	return true
+	return archive
 }
 
 // CopyTruncate copies path to path.<timestamp> and truncates the
@@ -589,30 +621,44 @@ func (r *Route) rotateIfDue(path string) bool {
 // on the same inode with no cooperation needed. The read loop re-checks
 // growth to shrink the loss window to the final truncate.
 func CopyTruncate(path string) error {
-	src, err := os.Open(path)
+	_, err := copyTruncate(path)
+	return err
+}
+
+func copyTruncate(path string) (string, error) {
+	src, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer src.Close()
-	dstPath := path + "." + time.Now().Format("20060102T150405.000")
+	dstPath := path + "." + time.Now().Format("20060102T150405.000000000")
 	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
-		return err
+		return "", err
 	}
-	// Read until EOF twice: the second pass catches appends that landed
-	// between the first EOF and the truncate decision.
-	if _, err := io.Copy(dst, src); err != nil {
-		dst.Close()
-		return err
-	}
-	if _, err := io.Copy(dst, src); err != nil {
-		dst.Close()
-		return err
+	complete := false
+	defer func() {
+		_ = dst.Close()
+		if !complete {
+			_ = os.Remove(dstPath)
+		}
+	}()
+	// Read to EOF twice to catch appends as close to the truncate as possible.
+	// Copytruncate still has a concurrent-write window; it is not lossless.
+	for i := 0; i < 2; i++ {
+		if _, err := io.Copy(dst, src); err != nil {
+			return "", err
+		}
 	}
 	if err := dst.Close(); err != nil {
-		return err
+		return "", err
 	}
-	return os.Truncate(path, 0)
+	// Truncate the same inode we copied, even if the pathname was replaced.
+	if err := src.Truncate(0); err != nil {
+		return "", err
+	}
+	complete = true
+	return dstPath, nil
 }
 
 // PruneRotated deletes the oldest rotated siblings beyond retain.
@@ -654,29 +700,38 @@ func ReadNewComplete(path string, off int64) (int64, []string, error) {
 // shrink races to EOF (the child truncated between stat and read): the
 // partial bytes are processed, the next tick re-syncs by offset rule.
 func readNewInto(path string, off int64, buf []byte) (int64, []string, []byte, error) {
+	noff, lines, buf, _, err := readNewIntoPrefix(path, off, buf, nil)
+	return noff, lines, buf, err
+}
+
+// prefix is an incomplete line from a previous rotated file. Incomplete
+// bytes in the current file remain unconsumed and are re-read next tick.
+func readNewIntoPrefix(path string, off int64, buf, prefix []byte) (int64, []string, []byte, []byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return off, nil, buf, err
+		return off, nil, buf, nil, err
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil {
-		return off, nil, buf, err
+		return off, nil, buf, nil, err
 	}
 	if st.Size() < off {
 		off = 0 // truncated/rotated: start over
 	}
 	if st.Size() == off {
-		return off, nil, buf, nil
+		return off, nil, buf, prefix, nil
 	}
-	want := int(st.Size() - off)
+	want := len(prefix) + int(min(st.Size()-off, int64(maxBatchBytes-len(prefix))))
 	if cap(buf) < want {
 		buf = make([]byte, want+want/2) // 1.5x headroom against per-tick realloc
 	}
 	if _, err := f.Seek(off, io.SeekStart); err != nil {
-		return off, nil, buf, err
+		return off, nil, buf, nil, err
 	}
-	got := 0
+	buf = buf[:want]
+	copy(buf, prefix)
+	got := len(prefix)
 	for got < want {
 		n, rerr := f.Read(buf[got:want])
 		got += n
@@ -684,11 +739,11 @@ func readNewInto(path string, off int64, buf []byte) (int64, []string, []byte, e
 			break
 		}
 		if rerr != nil {
-			return off, nil, buf, rerr
+			return off, nil, buf, nil, rerr
 		}
 	}
-	lines, _, consumed := SplitCompleteConsumed(buf[:got])
-	return off + int64(consumed), lines, buf, nil
+	lines, partial, consumed := SplitCompleteConsumed(buf[:got])
+	return off + int64(max(0, consumed-len(prefix))), lines, buf, partial, nil
 }
 
 // SplitComplete splits buf into complete (newline-terminated) lines; the

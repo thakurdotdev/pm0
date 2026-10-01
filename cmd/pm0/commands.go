@@ -36,8 +36,14 @@ func newFlagSet(name string) *flag.FlagSet {
 func runDaemon(args []string) {
 	fs := newFlagSet("daemon")
 	redact := fs.Bool("redact-env", false, "redact secret-looking env values in jlist/describe/dump")
+	httpAddr := fs.String("http-addr", "", "local HTTP API bind address (off unless set; e.g. 127.0.0.1:9615 or unix:/path)")
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
+	}
+	if *httpAddr != "" {
+		// The daemon reads PM0_HTTP_ADDR in Run(); a flag is the foreground
+		// convenience and takes precedence for this process.
+		_ = os.Setenv("PM0_HTTP_ADDR", *httpAddr)
 	}
 	if err := store.EnsureHome(); err != nil {
 		fatalf("%v", err)

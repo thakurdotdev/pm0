@@ -24,7 +24,9 @@ package proc
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -61,14 +63,10 @@ func AdoptTree(attrib string, mode Mode, cgRoot string, killSignal int, killTime
 
 	switch mode {
 	case ModeCgroupKill, ModeCgroupFreeze:
-		h.cgPath = cgroupDirFor(cgRoot, attrib)
-		if _, err := os.Stat(h.cgPath + "/" + cgroupProcsFile); err != nil {
-			// The cgroup dir is gone while marker-carrying processes are
-			// alive. A cgroup-mode tree is NOT a process-group leader
-			// (spawns into the daemon's group), so pgid kill semantics
-			// would be wrong — refuse rather than mismanage.
-			return nil, fmt.Errorf("adopt: cgroup dir %s missing for live tree %q: %w",
-				h.cgPath, attrib, ErrNoCgroup)
+		var err error
+		h.cgPath, err = findCgroupForLeader(cgRoot, attrib, leader)
+		if err != nil {
+			return nil, err
 		}
 	case ModePgid:
 		// Leader must still own its process group (the launcher created it
@@ -81,6 +79,14 @@ func AdoptTree(attrib string, mode Mode, cgRoot string, killSignal int, killTime
 	var err error
 	if h.starttime, err = StartTime(h.pid); err != nil {
 		return nil, fmt.Errorf("adopt: starttime of pid %d: %w", h.pid, err)
+	}
+	if env, err := os.ReadFile(procEnvironPath(leader)); err == nil {
+		for _, entry := range strings.Split(string(env), "\x00") {
+			if value, ok := strings.CutPrefix(entry, EnvLaunchKey+"="); ok {
+				h.launchToken = value
+				break
+			}
+		}
 	}
 
 	// Exit delivery: reaper when the leader is our child, poller otherwise.
@@ -146,10 +152,31 @@ func watchNonChild(h *Handle) {
 	}
 }
 
-// cgroupDirFor mirrors createCgroup's naming (root/<sanitized attrib>) for
-// adoption lookups.
-func cgroupDirFor(root, attrib string) string {
-	return root + "/" + SanitizeName(attrib)
+// findCgroupForLeader supports both legacy stable names and per-launch
+// cgroups. Membership identifies the incarnation, not a guessed directory
+// name, so adoption cannot accidentally own another reload worker's tree.
+func findCgroupForLeader(root, attrib string, leader int) (string, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return "", fmt.Errorf("adopt: read cgroup root: %w", err)
+	}
+	base := SanitizeName(attrib)
+	for _, entry := range entries {
+		if !entry.IsDir() || (entry.Name() != base && !strings.HasPrefix(entry.Name(), base+"-")) {
+			continue
+		}
+		path := filepath.Join(root, entry.Name())
+		pids, err := cgroupProcs(path)
+		if err != nil {
+			continue
+		}
+		for _, pid := range pids {
+			if pid == leader {
+				return path, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("adopt: no cgroup for live tree %q (pid %d): %w", attrib, leader, ErrNoCgroup)
 }
 
 // procEnvironPath is split out for tests.

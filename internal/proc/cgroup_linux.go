@@ -24,6 +24,9 @@ const cgroupProcsFile = "cgroup.procs"
 // a real v2 cgroup (cgroup.procs must exist). Caller is responsible for
 // RemoveCgroup cleanup.
 func createCgroup(root, name string) (string, error) {
+	if root == "" {
+		return "", fmt.Errorf("%w: no cgroup root resolved", ErrNoCgroup)
+	}
 	dir := filepath.Join(root, SanitizeName(name))
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		if os.IsExist(err) {

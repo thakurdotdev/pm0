@@ -145,6 +145,9 @@ func TestSlowSubscriberDropMarker(t *testing.T) {
 	if !strings.Contains(marker.Data, "[pm0: 8 stdout lines dropped]") {
 		t.Fatalf("marker = %q", marker.Data)
 	}
+	if marker.Dropped != 8 || marker.Seq == 0 {
+		t.Fatalf("drop marker missing control metadata: %+v", marker)
+	}
 	line := <-s.C()
 	if line.Data != "after" {
 		t.Fatalf("post-marker line = %q", line.Data)
@@ -156,6 +159,52 @@ func TestSlowSubscriberDropMarker(t *testing.T) {
 	e := <-s.C()
 	if e.Data != "boom" || e.Stream != Stderr {
 		t.Fatalf("stderr line = %+v", e)
+	}
+}
+
+func TestRotationCapturesUnreadLinesAndCarriesPartial(t *testing.T) {
+	dir := t.TempDir()
+	opts := fastOpts(dir)
+	opts.RotateMaxBytes = 16
+	opts.RotateRetain = 1
+	writer, err := os.OpenFile(opts.OutPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	r := NewRoute(opts)
+	defer r.Close()
+	sub := r.Subscribe()
+	if _, err := writer.WriteString("before-0\nbefore-1\npartial"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "rotation and unread backlog capture", func() bool {
+		return r.Stats().Rotations == 1 && len(r.BacklogAll(true)) == 2
+	})
+	if _, err := writer.WriteString("-rest\n"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "partial line crossing rotation", func() bool { return len(r.BacklogAll(true)) == 3 })
+	want := []string{"before-0", "before-1", "partial-rest"}
+	for i, entry := range r.BacklogAll(true) {
+		if entry.Data != want[i] {
+			t.Fatalf("backlog[%d]=%q, want %q", i, entry.Data, want[i])
+		}
+	}
+	for _, expected := range want {
+		select {
+		case entry := <-sub.C():
+			if entry.Data != expected {
+				t.Fatalf("stream entry=%q, want %q", entry.Data, expected)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("rotation omitted live line %q", expected)
+		}
+	}
+	select {
+	case entry := <-sub.C():
+		t.Fatalf("rotation duplicated a line: %+v", entry)
+	default:
 	}
 }
 

@@ -111,12 +111,22 @@ func (l *Launcher) Launch(spec Spec) (*Handle, error) {
 		}
 		return nil, err
 	}
+	// Release both ends on every pre-spawn failure, including log-open errors.
+	started := false
+	defer func() {
+		_ = childEnd.Close()
+		if !started {
+			ipc.close()
+		}
+	}()
 	env = append(filterEnvKey(env, NodeChannelFdEnv),
 		NodeChannelFdEnv+"="+strconv.Itoa(nodeChannelFd))
 
 	switch l.mode {
 	case ModeCgroupKill, ModeCgroupFreeze:
-		cgPath, err = createCgroup(l.cgRoot, spec.Name)
+		// A reload overlaps two workers at one public app id. Each launch
+		// owns a separate cgroup; the stable environment marker is unchanged.
+		cgPath, err = createCgroup(l.cgRoot, spec.Name+"-"+launchToken)
 		if err != nil {
 			ipc.close()
 			_ = childEnd.Close()
@@ -127,10 +137,15 @@ func (l *Launcher) Launch(spec Spec) (*Handle, error) {
 		// forks a grandchild before the parent could move it (the
 		// grandchild would land in the daemon's cgroup, outside the app's
 		// kill scope).
+		bin, resolveErr := exec.LookPath(spec.BinPath)
+		if resolveErr != nil {
+			_ = removeCgroup(cgPath)
+			return nil, fmt.Errorf("resolve %s: %w", spec.BinPath, resolveErr)
+		}
 		argv := append([]string{spec.BinPath}, spec.Args...)
 		argvJSON, _ := json.Marshal(argv)
 		wenv := append(env,
-			envExecPath+"="+spec.BinPath,
+			envExecPath+"="+bin,
 			envExecArgv+"="+string(argvJSON),
 			envExecProcs+"="+filepath.Join(cgPath, cgroupProcsFile),
 		)
@@ -200,6 +215,7 @@ func (l *Launcher) Launch(spec Spec) (*Handle, error) {
 		return nil, fmt.Errorf("spawn %s: %w", spec.BinPath, err)
 	}
 	_ = childEnd.Close() // the child owns its dup at fd 3 now
+	started = true
 
 	h := &Handle{
 		spec:        spec,
@@ -218,9 +234,8 @@ func (l *Launcher) Launch(spec Spec) (*Handle, error) {
 		h.starttime = 0
 	}
 	if cgPath != "" {
-		// OOM baseline (divergence 6): the counter is cumulative per
-		// cgroup dir and dirs are reused across restarts, so the delta
-		// is taken against THIS launch's baseline, read after creation.
+		// OOM baseline (divergence 6): compare this launch's counter before
+		// and after a SIGKILL to distinguish kernel OOM from manual kills.
 		h.oomBase = cgroupOomKills(cgPath)
 	}
 	go ipc.pump()
@@ -232,8 +247,7 @@ func (l *Launcher) Launch(spec Spec) (*Handle, error) {
 		if info.Signaled && info.TermSig == int(unix.SIGKILL) && h.cgPath != "" {
 			// SIGKILL death: distinguish kernel OOM from a manual kill
 			// -9 by the cgroup's cumulative oom_kill counter. Read
-			// before setExit so a racing relaunch (which recreates the
-			// cgroup) can not reset the counter under us.
+			// before setExit so actor cleanup cannot remove the cgroup first.
 			if n := cgroupOomKills(h.cgPath); n > h.oomBase {
 				info.OomKill = true
 			}

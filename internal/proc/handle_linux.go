@@ -217,9 +217,8 @@ func (h *Handle) StopWithin(deadline time.Time) error {
 	h.waitExitOrDone(time.Now().Add(GracePeriod))
 	exitWait := time.Since(exitStart)
 
-	// Release the IPC reader: the tree is gone (or about to be), nothing
-	// else will drain the channel. Pump's blocked read returns via
-	// shutdown+close; its goroutine exits with the done close.
+	// Release the pollable IPC reader: Close wakes its blocked read without
+	// retaining a raw descriptor that may be reused after EOF cleanup.
 	if h.ipc != nil {
 		h.ipc.close()
 	}

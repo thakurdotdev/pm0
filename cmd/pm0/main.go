@@ -132,6 +132,8 @@ Config files:
 Environment: PM0_HOME overrides ~/.pm0 (state root).
   PM0_PPROF_ADDR=127.0.0.1:6060 serves /debug/pprof on the daemon
   (localhost; unset by default). PM0_KILL_MODE forces a kill path.
+  PM0_HTTP_ADDR=127.0.0.1:9615 (or unix:/path) exposes the local REST API on
+  the daemon for dashboards; off by default (see docs/http-api.md).
 `)
 }
 
