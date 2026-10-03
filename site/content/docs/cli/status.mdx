@@ -1,0 +1,47 @@
+---
+title: pm0 status
+description: List supervised processes — the pm0 table with id, mode, pid, uptime, restarts, status, cpu, and mem.
+---
+
+Print the process table. Answers in 38.5 ms at 500 apps.
+
+## Usage
+
+```bash
+pm0 status [name...] [flags]
+```
+
+## Example
+
+```bash
+$ pm0 status
+name │ id │ mode    │ pid  │ uptime │ ↺ │ status │ cpu  │ mem
+api  │ 0  │ cluster │ 7731 │ 12s    │ 0 │ online │ 0.0% │ 46.6mb
+api  │ 1  │ cluster │ 7738 │ 12s    │ 0 │ online │ 0.0% │ 46.6mb
+```
+
+Pass names to filter: `pm0 status api worker`.
+
+## Flags
+
+| Flag          | Description                                |
+| ------------- | ------------------------------------------ |
+| `--watch`     | Refresh the table continuously.            |
+| `--sort <key>`| Sort by `name`, `cpu`, `mem`, or `uptime`. |
+
+## Column notes
+
+- **mode** — `cluster` (Node.js only, SO_REUSEPORT) or `fork`.
+- **↺** — restart count since the process was created.
+- **status** — `online`, `stopped`, `launching`, or `errored`.
+
+## Exit codes
+
+| Code | Meaning                    |
+| ---- | -------------------------- |
+| 0    | Table printed              |
+| 1    | Daemon unreachable         |
+
+## Aliases
+
+`ls`, `list` — identical behavior.

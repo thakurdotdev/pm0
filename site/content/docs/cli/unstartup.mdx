@@ -1,0 +1,42 @@
+---
+title: pm0 unstartup
+description: Remove the boot-persistence systemd unit installed by pm0 startup.
+---
+
+Undo [`pm0 startup`](/docs/cli/startup): remove the systemd unit that
+resurrects pm0 at boot.
+
+## Usage
+
+```bash
+pm0 unstartup [flags]
+```
+
+## Example
+
+```bash
+$ pm0 unstartup
+[pm0] To remove the Startup Script, copy/paste the following command:
+sudo env PM0_HOME=/home/deploy/.pm0 /usr/local/bin/pm0 unstartup systemd -u deploy --write
+```
+
+## Flags
+
+| Flag             | Description                          |
+| ---------------- | ------------------------------------ |
+| `systemd`        | Target init system (Linux default).  |
+| `-u, --user <u>` | User context the unit was created for. |
+| `--write`        | Actually remove the unit.            |
+
+## Notes
+
+- Processes keep running after unstartup — only the boot integration is
+  removed.
+- Re-enable any time with `pm0 startup` again.
+
+## Exit codes
+
+| Code | Meaning                      |
+| ---- | ---------------------------- |
+| 0    | Command printed / unit removed |
+| 1    | No unit found                |

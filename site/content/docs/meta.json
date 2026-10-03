@@ -1,0 +1,21 @@
+{
+  "title": "pm0 Docs",
+  "defaultOpen": false,
+  "pages": [
+    "introduction",
+    "installation",
+    "quickstart",
+    "migrating-from-pm2",
+    "core-concepts",
+    "---Architecture & API---",
+    "ecosystem-file",
+    "http-api",
+    "---Reference---",
+    "cli",
+    "guides",
+    "benchmarks",
+    "---More---",
+    "faq",
+    "troubleshooting"
+  ]
+}

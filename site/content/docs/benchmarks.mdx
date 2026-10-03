@@ -1,0 +1,68 @@
+---
+title: Benchmarks
+description: pm0 benchmark methodology — environment, harness, and 100-run averages for every published number.
+---
+
+Every number on this site comes from a reproducible harness. This page records
+exactly how the measurements were taken so you can trust — or reproduce —
+them.
+
+## Environment
+
+- **Machine:** 2 vCPU / 3.9 GB RAM Linux box (cgroup v2 enabled).
+- **PM2 version:** 7.0.4.
+- **pm0 version:** v0.1.6.
+- **TODO(DATA):** align the benchmarked pm0 version with the actually-tested
+  release — confirm against the README's benchmark section.
+- **Averages:** each scenario runs **100 times** and reports the mean; the
+  harness pins CPU governor and clears caches between runs.
+
+## Harness
+
+The harness scripts live in the repository and run both supervisors against
+identical fixtures (a Node HTTP app for throughput tests, a log generator for
+the flood test, a synthetic 500-app ecosystem file for scale tests):
+
+- Repository: [github.com/thakurdotdev/pm0](https://github.com/thakurdotdev/pm0)
+  — see the `bench/` directory. TODO(DATA): link the exact harness path.
+
+## Results
+
+| Scenario                         | PM2 7.0.4          | pm0                 | Delta            |
+| -------------------------------- | ------------------ | ------------------- | ---------------- |
+| Daemon idle RSS                  | 69 MB              | **16 MB**           | **−77% memory**  |
+| `list` @ 500 apps                | 245 ms             | **38.5 ms**         | **6.4× faster**  |
+| Ecosystem start @ 500 apps (time)| 1.97 s             | **0.31 s**          | **6.3× faster**  |
+| Ecosystem start @ 500 apps (RSS) | 139 MB             | **78 MB**           | **−44%**         |
+| 1,200 restart ops (per-op)       | 238 ms/op          | **6.5 ms/op**       | **37× faster**   |
+| 1,200 restart ops (total)        | 290 s              | **9.3 s**           | **37× faster**   |
+| Log flood @ 100 MB/s (CPU)       | 20.2%              | **5.7%**            | **3.6× less CPU**|
+| Cluster `-i 2` throughput        | 25.8k req/s        | **27.3k req/s**     | **pm0 +6%**      |
+| Idle CPU @ 0 apps                | 0.033%             | **0.033%**          | **parity**       |
+
+## What the numbers mean
+
+- **Memory and CLI latency** come from architecture, not tuning: a Go daemon
+  with Unix-socket IPC avoids hosting a JS runtime and warming V8 per
+  command.
+- **Restart throughput** is the actor mailbox serializing state changes
+  cheaply; PM2's per-op cost is dominated by IPC and GC pauses.
+- **Log flood CPU** reflects the ring-buffer design: copytruncate rotation
+  never pauses writers, so high-volume logging costs 5.7% CPU instead of
+  20.2%.
+- **Throughput and idle parity** show the honest cases: where the kernel
+  (SO_REUSEPORT fan-in) does the work, pm0 and PM2 land close together, and
+  pm0 does not claim otherwise.
+
+## Reproducing
+
+Clone the repo, install both supervisors, and run the harness:
+
+```bash
+git clone https://github.com/thakurdotdev/pm0.git
+cd pm0
+make bench   # TODO(DATA): verify the actual make target / script name
+```
+
+If your numbers differ materially, open an issue with your environment
+details — the suite is the project's contract with its own claims.

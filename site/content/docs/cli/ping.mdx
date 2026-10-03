@@ -1,0 +1,35 @@
+---
+title: pm0 ping
+description: Check that the pm0 daemon is alive — a 0.3 ms Unix-socket roundtrip for health checks.
+---
+
+Check daemon liveness. One roundtrip over the Unix socket in `$PM0_HOME` —
+typically ~0.3 ms, no V8 warmup.
+
+## Usage
+
+```bash
+pm0 ping
+```
+
+## Examples
+
+```bash
+pm0 ping && echo "daemon up"
+
+# Docker healthcheck
+HEALTHCHECK CMD pm0 ping || exit 1
+```
+
+## Notes
+
+- Prints `pong` and exits 0 when the daemon answers.
+- On failure it exits non-zero immediately — there is no retry loop, which
+  makes it safe for tight health-check intervals.
+
+## Exit codes
+
+| Code | Meaning                |
+| ---- | ---------------------- |
+| 0    | Daemon answered        |
+| 1    | Daemon unreachable     |

@@ -1,0 +1,23 @@
+{
+  "title": "CLI Reference",
+  "description": "Every pm0 command: flags, aliases, and exit codes.",
+  "defaultOpen": false,
+  "pages": [
+    "start",
+    "status",
+    "logs",
+    "describe",
+    "scale",
+    "reload",
+    "restart",
+    "stop",
+    "delete",
+    "save",
+    "resurrect",
+    "startup",
+    "unstartup",
+    "jlist",
+    "ping",
+    "kill"
+  ]
+}

@@ -1,0 +1,64 @@
+---
+title: FAQ
+description: Frequently asked questions about pm0 — compatibility, cluster mode, security, and operations.
+---
+
+<Accordions type="multiple">
+  <Accordion title="Is pm0 really a drop-in replacement for PM2?">
+    For the core workflow, yes: `start`, `status`, `logs`, `describe`, `scale`,
+    `reload`, `restart`, `stop`, `delete`, `save`, `resurrect`, `startup`, and
+    your existing `ecosystem.config.js` all behave the same way. The
+    [Migrating from PM2](/docs/migrating-from-pm2) page maps every command and
+    lists the gaps — like the module ecosystem and Windows/macOS support —
+    that pm0 does not cover yet.
+  </Accordion>
+
+  <Accordion title="Why is cluster mode 'Node.js only'?">
+    pm0's zero-downtime reload binds all workers to one shared socket using
+    the kernel's SO_REUSEPORT option, which Node exposes from version 23.2
+    (kernel ≥ 3.9). Other runtimes don't expose the same primitive in a way
+    pm0 can rely on, so they run as fork families with no shared port — and
+    pm0 says so instead of pretending otherwise.
+  </Accordion>
+
+  <Accordion title="Is the HTTP API on by default?">
+    No. It is **opt-in, off by default**, and when enabled it binds to
+    loopback or a Unix socket only, with **no built-in authentication**. Your
+    backend terminates auth. See [HTTP API](/docs/http-api) for the security
+    model.
+  </Accordion>
+
+  <Accordion title="How does pm0 use less memory than PM2?">
+    PM2 hosts the supervisor inside a Node.js runtime (69 MB idle RSS). pm0's
+    daemon is a compiled Go binary using 16 MB — a 77% reduction — while
+    keeping the CLI itself stateless. The CLI answers in 38.5 ms at 500 apps
+    because each command is one 0.3 ms Unix-socket roundtrip with no V8
+    warmup.
+  </Accordion>
+
+  <Accordion title="What happens to children when a process is killed?">
+    Process tracking uses cgroup v2: every child spawned by a supervised
+    process is part of the tracked group, and the kill path (SIGINT →
+    kill_timeout → SIGKILL, delivered through the actor mailbox) reaps the
+    whole tree. No orphaned children.
+  </Accordion>
+
+  <Accordion title="Do I need pm2-logrotate for pm0?">
+    No. Log rotation is built in: size-based copytruncate ring buffers per
+    process, for stdout and stderr. Rotation never pauses writers — that's
+    part of why a 100 MB/s log flood costs 5.7% CPU instead of PM2's 20.2%.
+  </Accordion>
+
+  <Accordion title="Which architectures are supported?">
+    amd64, arm64, arm, and 386, via the release assets and the install script
+    (which auto-detects). The binary is a static ELF with zero runtime
+    dependencies on Linux. See [Installation](/docs/installation).
+  </Accordion>
+
+  <Accordion title="How do I report a problem or check the roadmap?">
+    Open an issue at
+    [github.com/thakurdotdev/pm0/issues](https://github.com/thakurdotdev/pm0/issues).
+    The project is MIT-licensed and the roadmap is driven by real usage — the
+    [changelog](/changelog) shows how fast things land.
+  </Accordion>
+</Accordions>

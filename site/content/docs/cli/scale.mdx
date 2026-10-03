@@ -1,0 +1,45 @@
+---
+title: pm0 scale
+description: Grow or shrink a pm0 cluster to N workers — SO_REUSEPORT makes scaling zero-downtime on Node.js.
+---
+
+Change the number of workers in a cluster. Scaling up binds new workers to
+the shared SO_REUSEPORT socket immediately; scaling down drains them
+gracefully.
+
+## Usage
+
+```bash
+pm0 scale <name> <N> [flags]
+```
+
+## Examples
+
+```bash
+pm0 scale api 4
+pm0 scale api +2      # relative
+pm0 scale api -1      # relative
+```
+
+## Flags
+
+| Flag                | Description                                          |
+| ------------------- | ---------------------------------------------------- |
+| `--kill-timeout <ms>`| Grace period used when draining removed workers.    |
+
+## Notes
+
+- **Cluster mode is Node.js only** (Node ≥ 23.2, kernel ≥ 3.9). Fork-family
+  processes cannot share a port, so `scale` on a fork process reports a
+  usage error.
+- Scaling is always sequential per worker — it uses the same safe swap as
+  `reload`, never `--parallel`.
+
+## Exit codes
+
+| Code | Meaning                            |
+| ---- | ---------------------------------- |
+| 0    | Cluster resized                    |
+| 1    | Runtime error (spawn failure)      |
+| 2    | Usage error (fork mode, bad count) |
+| 127  | Process not found                  |

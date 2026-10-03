@@ -1,0 +1,47 @@
+---
+title: pm0 delete
+description: Stop and remove processes from pm0's list — with --parallel for fast teardown in CI.
+---
+
+Stop processes and remove them from the process list and the saved snapshot
+context. Their ring-buffer log files remain on disk under `$PM0_HOME/logs`.
+
+## Usage
+
+```bash
+pm0 delete <name...> [flags]
+```
+
+## Examples
+
+```bash
+pm0 delete api
+pm0 delete fixture-api fixture-worker --parallel   # fast CI teardown
+pm0 delete all                                      # remove everything
+```
+
+## Flags
+
+| Flag                  | Description                                        |
+| --------------------- | -------------------------------------------------- |
+| `--parallel`          | Delete all named processes simultaneously.         |
+| `--kill-timeout <ms>` | Grace period before SIGKILL.                       |
+
+## Notes
+
+- `delete` implies `stop`: the same SIGINT → kill_timeout → SIGKILL path
+  applies.
+- Environment layers applied via `--env` are removed with the process — a
+  later `start` begins from the ecosystem file again.
+
+## Exit codes
+
+| Code | Meaning                 |
+| ---- | ----------------------- |
+| 0    | Deleted                 |
+| 1    | Runtime error           |
+| 127  | Process not found       |
+
+## Aliases
+
+`del`, `rm` — identical behavior.

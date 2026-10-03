@@ -1,0 +1,71 @@
+---
+title: Zero-Downtime Deploys
+description: How pm0 reload achieves zero dropped connections, why it is sequential by design, and how rollback works.
+---
+
+This page explains the deploy path most people install pm0 for: reloading a
+running app without dropping a single connection.
+
+## The mechanics
+
+With cluster mode (`pm0 start api.js -i max`, **Node.js only** — Node ≥ 23.2,
+kernel ≥ 3.9), every worker shares one listening socket via **SO_REUSEPORT**.
+The kernel load-balances new connections across the live workers.
+
+A rolling `pm0 reload api` then works like this:
+
+1. Pick the first worker: stop accepting new work and send SIGINT (graceful
+   shutdown, up to `kill_timeout`).
+2. Start its replacement and **wait until the replacement is online**.
+3. Only then move to the next worker.
+4. If a replacement fails to come up, **roll back** — keep the previous
+   workers running instead of leaving the fleet half-replaced.
+
+Because at least one healthy worker is always bound to the shared socket,
+new connections never see a closed port.
+
+```bash
+pm0 reload api
+```
+
+## Why reload is always sequential
+
+`reload` exists to protect availability, so pm0 refuses to parallelize it —
+that would momentarily remove all workers from the shared socket. `stop`,
+`restart`, and `delete` do accept `--parallel`, which trades staggered
+downtime for wall-clock speed:
+
+```bash
+pm0 restart api --parallel   # all workers restart at once (brief outage)
+pm0 reload api               # always sequential (no outage, with rollback)
+```
+
+Rule of thumb: `--parallel` is for CI teardown and throwaway processes;
+`reload` is for production traffic.
+
+## Fork-family runtimes
+
+Bun, Deno, Python, Go, and Rust processes run as fork families with **no
+shared port**, so a socket-level zero-downtime swap is impossible inside pm0.
+Options, in order of preference:
+
+1. Run multiple named processes behind a reverse proxy (nginx, Caddy) and
+   `pm0 reload` them one at a time (`pm0 reload api-a`, then `api-b`).
+2. Use `pm0 restart --parallel` when a short outage is acceptable (batch
+   workers, queues).
+3. Accept staggered restarts via plain `pm0 reload` on fork processes — pm0
+   still restarts them one at a time and rolls back on failure.
+
+## A complete deploy
+
+```bash
+git pull --ff-only
+npm ci --omit=dev
+pm0 start ecosystem.config.js --env production   # idempotent
+pm0 reload api                                   # rolling swap
+pm0 save                                         # persist the topology
+```
+
+Health gating beyond "process is online" (checking an HTTP endpoint before
+advancing the rollout) belongs to your proxy or deploy tool — pm0's rollback
+trigger is worker startup failure.

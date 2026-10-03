@@ -1,0 +1,44 @@
+---
+title: pm0 stop
+description: Stop pm0 processes — SIGINT, kill_timeout, SIGKILL through the actor mailbox. --parallel available.
+---
+
+Stop processes but keep them in the process list (status becomes `stopped`).
+To remove them entirely, use [`pm0 delete`](/docs/cli/delete).
+
+## Usage
+
+```bash
+pm0 stop <name...> [flags]
+```
+
+## Examples
+
+```bash
+pm0 stop api
+pm0 stop api worker --parallel   # stop everything at once
+```
+
+## Flags
+
+| Flag                 | Description                                            |
+| -------------------- | ------------------------------------------------------ |
+| `--parallel`         | Stop all workers simultaneously — trades staggered downtime for wall-clock speed. |
+| `--kill-timeout <ms>`| Grace period between SIGINT and SIGKILL (default 1600).|
+
+## Kill semantics
+
+1. **SIGINT** — graceful shutdown.
+2. **kill_timeout** — wait up to the configured grace period.
+3. **SIGKILL** — only if the process ignores SIGINT.
+
+All signals flow through the daemon's actor mailbox in strict order, and
+cgroup v2 tracking reaps the whole child tree — no orphans.
+
+## Exit codes
+
+| Code | Meaning                 |
+| ---- | ----------------------- |
+| 0    | Stopped                 |
+| 1    | Runtime error           |
+| 127  | Process not found       |

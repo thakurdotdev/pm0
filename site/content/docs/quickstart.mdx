@@ -1,0 +1,91 @@
+---
+title: Quickstart
+description: Start, scale, reload, and persist your first app with pm0 — Node, Bun, Deno, Python, Go, Rust, or shell.
+---
+
+This guide walks through the everyday pm0 workflow. It assumes pm0 is
+[installed](/docs/installation) and on your `PATH`.
+
+## Start your first app
+
+Any Node entrypoint works out of the box. The `-i max` flag starts one cluster
+worker per CPU core (**cluster mode is Node.js only**):
+
+```bash
+pm0 start api.js -i max
+pm0 start api.js          # single fork process
+```
+
+## Runtimes
+
+pm0 auto-detects the runtime from the script header and launches it as a fork
+family unless cluster mode is requested:
+
+```bash
+pm0 start app.js          # Node.js
+pm0 start app.ts          # Bun (bun)
+pm0 start app.tsx         # Deno
+pm0 start main.py         # Python
+pm0 start server.go       # Go (compiled first, then supervised)
+pm0 start server          # Rust/Go prebuilt binary
+pm0 start worker.sh       # shell script
+```
+
+For a prebuilt binary where pm0 should not prepend any interpreter:
+
+```bash
+pm0 start ./dist/server --interpreter none
+```
+
+<Callout type="info" title="Cluster mode is Node.js only">
+  `-i max` / `-i N` uses SO_REUSEPORT for kernel-level zero-downtime reloads.
+  That requires **Node ≥ 23.2** and **kernel ≥ 3.9**. Other runtimes always run
+  as fork families with no shared port — see
+  [Core Concepts](/docs/core-concepts).
+</Callout>
+
+## Manage the app
+
+```bash
+pm0 status                # table of processes
+pm0 describe api          # full details for one process
+pm0 logs api              # stream logs
+pm0 logs api --err        # stderr only
+pm0 scale api 4           # grow/shrink a cluster to 4 workers
+pm0 reload api            # zero-downtime rolling reload (sequential)
+pm0 restart api           # full restart
+pm0 stop api              # stop (SIGINT → kill_timeout → SIGKILL)
+pm0 delete api            # stop and remove from the list
+```
+
+## Persist across restarts
+
+Save the current process list, enable boot persistence, and restore:
+
+```bash
+pm0 save                  # snapshot $PM0_HOME/dump.pm0
+pm0 startup               # print the systemd/boot integration command
+pm0 resurrect             # restore the saved list
+```
+
+The full sequence for a server is described in the
+[systemd guide](/docs/guides/systemd).
+
+## Ecosystem files
+
+Use your existing PM2 ecosystem file directly:
+
+```bash
+pm0 start ecosystem.config.js
+pm0 start ecosystem.config.js --only api
+pm0 start ecosystem.config.js --env production
+```
+
+See [Ecosystem File](/docs/ecosystem-file) for the supported fields and env
+layering rules.
+
+## Next steps
+
+- [Migrating from PM2](/docs/migrating-from-pm2) — command mapping and gaps.
+- [CLI Reference](/docs/cli/start) — flags, aliases, and exit codes.
+- [HTTP API](/docs/http-api) — opt-in REST + SSE for tooling.

@@ -1,0 +1,68 @@
+---
+title: CI/CD
+description: Use pm0 in CI pipelines and deploy flows — jlist for assertions, kill for teardown, --parallel for fast cleanup.
+---
+
+pm0 fits CI in two roles: running multi-process fixtures during tests, and
+receiving deploys on a build server.
+
+## Running app + deps in a test job
+
+Start the services your tests need, wait for readiness, tear down
+deterministically:
+
+```yaml
+# GitHub Actions example
+- name: Start fixture stack
+  run: |
+    pm0 start test/fixture-api.js --name fixture-api
+    pm0 start test/fixture-worker.py --name fixture-worker
+
+- name: Wait for readiness
+  run: |
+    for i in $(seq 1 30); do
+      pm0 ping && pm0 jlist | jq -e '.[] | select(.name=="fixture-api" and .status=="online")' && exit 0
+      sleep 1
+    done
+    exit 1
+
+- name: Run tests
+  run: npm test
+
+- name: Teardown
+  if: always()
+  run: pm0 delete fixture-api fixture-worker --parallel
+```
+
+Why this works well in CI:
+
+- **Fast CLI** — every `pm0` call is sub-40 ms even with hundreds of
+  processes, so readiness loops are cheap.
+- **Deterministic teardown** — `delete --parallel` stops everything at once
+  (you opt into it for wall-clock speed), and cgroup v2 tracking means no
+  orphaned fixtures leak into later steps.
+- **JSON output** — `pm0 jlist` is stable JSON for assertions, exactly like
+  `pm2 jlist`.
+
+## Deploying to a build server
+
+The zero-downtime flow on a VM-style target:
+
+```bash
+git pull --ff-only
+npm ci --omit=dev
+pm0 start ecosystem.config.js --env production   # no-op if already started
+pm0 reload api                                    # sequential, with rollback
+pm0 save
+```
+
+If `reload` fails on the new code, pm0 rolls back to the previous workers —
+see [Zero-Downtime Deploys](/docs/guides/zero-downtime-deploys).
+
+## One supervisor per host, or per job?
+
+- **Per job** (CI runners): install pm0 into the job, use it, `pm0 kill` at
+  the end. Cleanest isolation.
+- **Per host** (deploy target): one daemon, `save` + `startup` enabled, and
+  your deploy pipeline only calls `pm0 reload`. The
+  [systemd guide](/docs/guides/systemd) covers persistence.

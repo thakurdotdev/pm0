@@ -1,0 +1,84 @@
+---
+title: Core Concepts
+description: How the pm0 daemon, Unix socket IPC, cluster mode, process lifecycle, and log ring buffers work.
+---
+
+Understanding four building blocks explains almost everything pm0 does.
+
+## Daemon and Unix socket IPC
+
+pm0 runs a single background daemon that owns all supervised processes. Every
+CLI invocation — `status`, `logs`, `scale` — is a thin client that talks to
+the daemon over a **Unix domain socket** in `$PM0_HOME`.
+
+The consequences are practical, not academic:
+
+- **0.3 ms roundtrip** — a Unix socket has no TCP handshake and no V8 warmup,
+  so `pm0 list` at 500 apps answers in 38.5 ms.
+- **No port conflicts** — the control plane never touches TCP. The only TCP
+  listeners belong to your applications.
+- **One source of truth** — the daemon's actor mailbox serializes every state
+  change, which is why kill semantics are deterministic.
+
+If the daemon is down, commands fail fast. `pm0 ping` checks liveness, and
+`pm0 kill` stops daemon and children.
+
+## Cluster mode and SO_REUSEPORT
+
+With `-i N` (or `-i max`), pm0 starts N workers that share one listening
+socket through the kernel's **SO_REUSEPORT** option: the kernel load-balances
+connections across workers, and rolling reloads swap workers with zero dropped
+connections.
+
+<Callout type="warn" title="Node.js only">
+  Cluster mode requires **Node ≥ 23.2** and **kernel ≥ 3.9**. Every other
+  runtime — Bun, Deno, Python, Go, Rust, shell — runs as a **fork family with
+  no shared port**. For those runtimes, put a load balancer or reverse proxy
+  in front if you need multi-worker traffic distribution.
+</Callout>
+
+`reload` walks the workers **sequentially by design**: it kills worker 0,
+waits for the replacement to come healthy, then moves to worker 1. If a new
+worker fails to start, pm0 rolls back to the previous state instead of leaving
+you with a half-dead fleet. This is why `reload` does not support `--parallel`
+while `stop`, `restart`, and `delete` do.
+
+## Process lifecycle and signals
+
+When you run `pm0 stop <app>` (or restart a worker), the kill path is:
+
+1. **SIGINT** — graceful shutdown signal to the process.
+2. **kill_timeout** — pm0 waits up to the configured `kill_timeout`
+   (ecosystem field or `--kill-timeout`) for a clean exit.
+3. **SIGKILL** — only if the process ignores SIGINT past the timeout.
+
+All of this flows through the daemon's **actor mailbox**, so signals are
+delivered in a strict order — no double-kills, no races between a `stop` and a
+`reload` targeting the same worker.
+
+Process tracking uses **cgroup v2**. The daemon records every child it spawns,
+so when a supervisor dies or a worker forks helpers, killing the tracked group
+reaps the whole tree — zero orphaned children.
+
+## Ring-buffer logs and rotation
+
+Each process gets a ring buffer for stdout and stderr. Logs are appended to a
+file pair (`out`/`err`) with **size-based rotation using copytruncate**: when a
+log reaches its size cap, the file is copied to a numbered rotation slot and
+truncated in place — the running process keeps its file descriptor, so nothing
+breaks mid-write.
+
+- Rotation is built in — no external module to install.
+- `pm0 logs <app>` streams from the live buffer; `--lines N` shows history.
+- Ring buffers cap memory usage during floods: at a 100 MB/s log flood, pm0
+  uses 5.7% CPU vs PM2's 20.2%.
+
+## Where state lives
+
+| Path                          | Purpose                          |
+| ----------------------------- | -------------------------------- |
+| `$PM0_HOME/pm0.sock`          | Unix socket (control plane)      |
+| `$PM0_HOME/dump.pm0`          | `pm0 save` snapshot              |
+| `$PM0_HOME/logs/<app>-out.log`| stdout ring buffer               |
+| `$PM0_HOME/logs/<app>-err.log`| stderr ring buffer               |
+| `$PM0_HOME/config`            | HTTP API address and options     |

@@ -1,0 +1,11 @@
+{
+  "title": "Guides",
+  "description": "Production recipes for running pm0.",
+  "defaultOpen": false,
+  "pages": [
+    "systemd",
+    "docker",
+    "cicd",
+    "zero-downtime-deploys"
+  ]
+}

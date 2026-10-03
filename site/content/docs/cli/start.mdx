@@ -1,0 +1,48 @@
+---
+title: pm0 start
+description: Start a process or an ecosystem file — flags for cluster mode, interpreter overrides, and env layers.
+---
+
+Start a script, prebuilt binary, or ecosystem file under supervision.
+
+## Usage
+
+```bash
+pm0 start <script|ecosystem.config.js> [args...] [flags]
+```
+
+## Examples
+
+```bash
+pm0 start api.js -i max                    # cluster, one worker per core (Node.js only)
+pm0 start worker.py                        # Python, auto-detected
+pm0 start ./dist/server --interpreter none # prebuilt binary, no interpreter
+pm0 start ecosystem.config.js --env production --only api,worker
+```
+
+## Flags
+
+| Flag                 | Description                                                        |
+| -------------------- | ------------------------------------------------------------------ |
+| `-i, --instances N`  | Cluster workers (`max` = one per CPU core). **Node.js only.**      |
+| `--interpreter <x>`  | Force an interpreter (`bun`, `python3`, …). `none` for binaries.   |
+| `--name <name>`      | Override the process name.                                         |
+| `--env <name>`       | Apply the `env_<name>` layer from the ecosystem file.              |
+| `--only <names>`     | Start only these apps from an ecosystem file.                      |
+| `--kill-timeout <ms>`| Grace period between SIGINT and SIGKILL (default 1600).            |
+| `--max-memory <size>`| Auto-restart when RSS exceeds the cap (e.g. `512M`).               |
+| `--no-autorestart`   | Do not restart on unexpected exit.                                 |
+
+## Exit codes
+
+| Code | Meaning                          |
+| ---- | -------------------------------- |
+| 0    | All requested processes started  |
+| 1    | Runtime error (spawn failure)    |
+| 2    | Usage error (bad flags)          |
+| 127  | Process or file not found        |
+
+## Aliases
+
+`pm0 start` accepts ecosystem files in place of a script. There is no
+separate `pm0 app` command — starting an ecosystem file is the same command.

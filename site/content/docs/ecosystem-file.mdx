@@ -1,0 +1,101 @@
+---
+title: Ecosystem File
+description: Full field reference for ecosystem.config.js with pm0 — env layers, --only, and --env production.
+---
+
+pm0 reads your existing PM2 `ecosystem.config.js` without modification. Point
+it at the file:
+
+```bash
+pm0 start ecosystem.config.js
+pm0 start ecosystem.config.js --only api
+pm0 start ecosystem.config.js --env production
+```
+
+## Example
+
+```js
+// ecosystem.config.js
+module.exports = {
+  apps: [
+    {
+      name: "api",
+      script: "./src/server.js",
+      instances: 2, // cluster mode (Node.js only)
+      exec_mode: "cluster",
+      env: {
+        NODE_ENV: "development",
+        PORT: 3000,
+      },
+      env_production: {
+        NODE_ENV: "production",
+        PORT: 8080,
+      },
+      max_memory_restart: "512M",
+      kill_timeout: 5000,
+      out_file: "./logs/api-out.log",
+      error_file: "./logs/api-err.log",
+    },
+    {
+      name: "worker",
+      script: "./src/worker.ts", // runs under Bun (fork family)
+      interpreter: "bun",
+      env_production: { QUEUE: "default" },
+    },
+  ],
+};
+```
+
+## Field reference
+
+<TypeTable
+  type={{
+    name: { type: "string", description: "Process name used by status, logs, reload, etc.", default: "script basename" },
+    script: { type: "string", description: "Entry file or prebuilt binary path.", required: true },
+    args: { type: "string | string[]", description: "Arguments passed after the script.", default: "—" },
+    interpreter: { type: "string", description: 'Explicit interpreter, e.g. "bun", "python3". Use "none" for prebuilt binaries.', default: "auto-detected" },
+    instances: { type: "number | 'max'", description: "Cluster workers. Cluster mode is Node.js only.", default: "1 (fork)" },
+    exec_mode: { type: '"cluster" | "fork"', description: "Cluster uses SO_REUSEPORT (Node ≥ 23.2).", default: '"fork"' },
+    cwd: { type: "string", description: "Working directory for the process.", default: "ecosystem dir" },
+    env: { type: "object", description: "Base environment variables.", default: "{}" },
+    env_production: { type: "object", description: "Merged over env when using --env production.", default: "{}" },
+    max_memory_restart: { type: "string", description: 'Auto-restart when RSS exceeds, e.g. "512M".', default: "off" },
+    kill_timeout: { type: "number", description: "Milliseconds between SIGINT and SIGKILL.", default: "1600" },
+    out_file: { type: "string", description: "stdout log path (ring buffer).", default: "$PM0_HOME/logs/<name>-out.log" },
+    error_file: { type: "string", description: "stderr log path (ring buffer).", default: "$PM0_HOME/logs/<name>-err.log" },
+    autorestart: { type: "boolean", description: "Restart on unexpected exit.", default: "true" },
+    only: { type: "string | string[]", description: "Restrict the start to named apps (CLI flag --only).", default: "—" },
+  }}
+/>
+
+## Environment layers
+
+Variables merge in this order (later wins):
+
+1. `env` — the base layer, always applied.
+2. `env_<name>` — applied when you pass `--env <name>` (e.g. `--env
+   production` applies `env_production`).
+3. Shell environment — variables already present in the daemon's environment
+   are preserved unless overridden above.
+
+```bash
+pm0 start ecosystem.config.js --env production
+```
+
+<Callout type="info" title="env is sticky until delete">
+  pm0 keeps the merged environment for the process name until you
+  <code>delete</code> it. A later <code>restart</code> reuses the same layer
+  set; pass <code>--env</code> again on the start command to change layers.
+</Callout>
+
+## Selecting apps
+
+Run a subset of the file with `--only`:
+
+```bash
+pm0 start ecosystem.config.js --only api
+pm0 start ecosystem.config.js --only api,worker
+```
+
+Everything else in the file is ignored, so you can keep one ecosystem file for
+a whole machine and start pieces per service.

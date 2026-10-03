@@ -1,0 +1,87 @@
+---
+title: Troubleshooting
+description: Common pm0 problems and fixes — daemon issues, cluster mode requirements, logs, and checksums.
+---
+
+Quick fixes for the issues users hit most often.
+
+## `pm0` commands hang or fail to connect
+
+The CLI needs a live daemon over the Unix socket in `$PM0_HOME`.
+
+```bash
+pm0 ping            # daemon liveness
+pm0 kill            # stop daemon + processes (last resort)
+pm0 resurrect       # start the daemon and restore the saved list
+```
+
+If the socket file is stale after a crash, `pm0 ping` recreates it. Check
+`$PM0_HOME` matches between the shell and any systemd unit (`Environment=
+PM0_HOME=...`).
+
+## Cluster mode refuses to start
+
+Cluster mode requires **Node ≥ 23.2** and **kernel ≥ 3.9** (SO_REUSEPORT).
+Check what pm0 sees:
+
+```bash
+node --version
+uname -r
+```
+
+On older Node lines, run fork mode instead (`pm0 start api.js` without `-i`)
+and put a reverse proxy in front for load balancing — see
+[Core Concepts](/docs/core-concepts#cluster-mode-and-so-reuseport).
+
+## "Port already in use" on reload
+
+A previous worker didn't release the port because it's not a SO_REUSEPORT
+listener (fork mode, or a non-Node runtime). Fork families don't share ports;
+either switch the app to cluster mode (Node.js only) or reload via your
+proxy's guidance — see [Zero-Downtime Deploys](/docs/guides/zero-downtime-deploys).
+
+## A process restarts in a loop
+
+Inspect stderr and the restart counter (`↺` column):
+
+```bash
+pm0 logs <app> --err --lines 100
+pm0 describe <app>
+```
+
+Common causes: missing environment layer (`--env production` not passed),
+missing interpreter (`--interpreter none` for prebuilt binaries), or
+`max_memory_restart` triggering. pm0 kills and restarts the tracked group via
+cgroup v2, so a crashing parent also kills its children — check for wrappers
+that daemonize themselves.
+
+## Checksum verification fails
+
+Re-download the asset and confirm the digest matches
+[checksums.txt](https://github.com/thakurdotdev/pm0/releases/latest/download/checksums.txt):
+
+```bash
+curl -fsSL https://github.com/thakurdotdev/pm0/releases/latest/download/checksums.txt \
+  | sha256sum -c -
+```
+
+A persistent mismatch usually means a cached/proxied partial download — clear
+the cache or download from the release page directly.
+
+## cgroup v2 requirements
+
+pm0 tracks processes through cgroup v2 (unified hierarchy). On old kernels or
+hybrid-cgroup setups, tracking degrades and orphan prevention weakens:
+
+```bash
+stat -fc %T /sys/fs/cgroup/   # cgroup2fs = v2 unified
+```
+
+Rootless Docker and some sandboxes delegate a limited subtree — pm0 works
+within the delegated part; see the [Docker guide](/docs/guides/docker).
+
+## Still stuck?
+
+Search [GitHub Issues](https://github.com/thakurdotdev/pm0/issues) or open a
+new one with `pm0 jlist` output (redact anything sensitive) and your
+`uname -a`.

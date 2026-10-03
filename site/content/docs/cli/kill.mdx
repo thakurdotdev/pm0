@@ -1,0 +1,34 @@
+---
+title: pm0 kill
+description: Stop the pm0 daemon and every supervised process — the full teardown.
+---
+
+Stop the daemon **and all supervised processes**, then remove the socket.
+This is the full teardown — not a per-process kill (that's
+[`pm0 stop`](/docs/cli/stop)).
+
+## Usage
+
+```bash
+pm0 kill
+```
+
+## Notes
+
+- Every process receives SIGINT → kill_timeout → SIGKILL through the actor
+  mailbox, then the daemon exits.
+- The saved snapshot (`pm0 save`) is left intact — after a `kill`,
+  `pm0 resurrect` brings everything back.
+- In containers this is a clean CMD teardown; see the
+  [Docker guide](/docs/guides/docker).
+
+## Exit codes
+
+| Code | Meaning                       |
+| ---- | ----------------------------- |
+| 0    | Daemon stopped                |
+| 1    | Some processes resisted death |
+
+## Aliases
+
+`exit` — identical behavior.

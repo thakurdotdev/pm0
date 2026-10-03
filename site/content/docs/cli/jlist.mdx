@@ -1,0 +1,41 @@
+---
+title: pm0 jlist
+description: Machine-readable JSON list of all processes — the stable scripting surface for CI and dashboards.
+---
+
+Print all processes as JSON. This is the scripting surface — the shape is
+stable and matches the [HTTP API](/docs/http-api) `/api/v1/processes` payload.
+
+## Usage
+
+```bash
+pm0 jlist [name...]
+```
+
+## Example
+
+```bash
+$ pm0 jlist api | jq '.[0].status'
+"online"
+
+# Fail a CI step unless api is online
+pm0 jlist | jq -e '.[] | select(.name=="api" and .status=="online")'
+```
+
+## Fields
+
+Each entry includes: `name`, `id`, `mode` (`cluster`/`fork`), `pid`,
+`uptime`, `restarts`, `status`, `cpu`, `mem`, `interpreter`, and the log
+paths. Cluster processes (Node.js only) list one entry per worker.
+
+## Notes
+
+- Output is a JSON array, UTF-8, one process per element.
+- No flags — pipe to `jq` for filtering.
+
+## Exit codes
+
+| Code | Meaning              |
+| ---- | -------------------- |
+| 0    | JSON printed         |
+| 1    | Daemon unreachable   |

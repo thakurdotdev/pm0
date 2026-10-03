@@ -1,0 +1,36 @@
+---
+title: pm0 save
+description: Snapshot the current process list to $PM0_HOME/dump.pm0 for boot persistence.
+---
+
+Snapshot the current process list — names, scripts, env layers, flags — to
+`$PM0_HOME/dump.pm0`. [`pm0 resurrect`](/docs/cli/resurrect) restores it.
+
+## Usage
+
+```bash
+pm0 save
+```
+
+## Typical sequence
+
+```bash
+pm0 start ecosystem.config.js --env production
+pm0 save          # persist the topology
+pm0 startup       # enable boot persistence
+```
+
+## Notes
+
+- Re-run `save` after every topology change (add, remove, scale). The next
+  boot restores exactly the last snapshot.
+- The snapshot is plain JSON — safe to inspect or back up.
+- Combined with `pm0 startup`, this is the full persistence story; see the
+  [systemd guide](/docs/guides/systemd) for the manual unit file.
+
+## Exit codes
+
+| Code | Meaning                    |
+| ---- | -------------------------- |
+| 0    | Snapshot written           |
+| 1    | Daemon unreachable / write failed |

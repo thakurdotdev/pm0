@@ -1,0 +1,51 @@
+---
+title: pm0 logs
+description: Stream or print process logs from pm0's ring buffers — stdout/stderr, line counts, and live follow.
+---
+
+Stream logs from a process's ring buffers, or print recent history. Logs are
+stored with size-based copytruncate rotation, so following never races with
+rotation.
+
+## Usage
+
+```bash
+pm0 logs [name] [flags]
+```
+
+Omit `name` to stream all processes interleaved.
+
+## Examples
+
+```bash
+pm0 logs api            # follow api's combined output
+pm0 logs api --err      # stderr only
+pm0 logs api --lines 200
+pm0 logs                # follow everything
+```
+
+## Flags
+
+| Flag         | Description                            |
+| ------------ | -------------------------------------- |
+| `--err`      | Show stderr instead of stdout.         |
+| `--lines N`  | Print the last N lines, then exit.     |
+| `--raw`      | Do not prefix lines with the app name. |
+
+## Notes
+
+- Ring buffers cap disk use per process; older lines are rotated away by
+  size, not by time.
+- Log flood cost is measured at 5.7% CPU for a 100 MB/s stream — see
+  [Benchmarks](/docs/benchmarks).
+
+## Exit codes
+
+| Code | Meaning                    |
+| ---- | -------------------------- |
+| 0    | Stream closed cleanly      |
+| 1    | Daemon or process not found|
+
+## Aliases
+
+`log` — identical behavior.

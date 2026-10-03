@@ -1,0 +1,45 @@
+---
+title: pm0 describe
+description: Show full details for one pm0 process — pid, interpreter, env, restarts, kill path, and log paths.
+---
+
+Print everything the daemon knows about one process.
+
+## Usage
+
+```bash
+pm0 describe <name> [flags]
+```
+
+## Example
+
+```bash
+pm0 describe api
+```
+
+Typical fields: name, id, mode (`cluster`/`fork`), interpreter, pid(s), uptime,
+restart counter, status, CPU and memory, `kill_timeout`,
+`max_memory_restart`, env layers applied at start, and the exact log file
+paths.
+
+## Flags
+
+| Flag    | Description                              |
+| ------- | ---------------------------------------- |
+| `--json`| Machine-readable output (same as jlist). |
+
+## Notes
+
+- For scripting, prefer `pm0 jlist <name>` — its JSON shape is stable.
+- The restart counter (`↺` in `pm0 status`) matches the restarts field here.
+
+## Exit codes
+
+| Code | Meaning                 |
+| ---- | ----------------------- |
+| 0    | Details printed         |
+| 127  | Process not found       |
+
+## Aliases
+
+`show`, `info` — identical behavior.

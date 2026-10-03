@@ -1,0 +1,78 @@
+---
+title: Introduction
+description: pm0 is a drop-in PM2-compatible process supervisor written in Go — one static binary, zero runtime dependencies.
+---
+
+pm0 is a **drop-in PM2-compatible process supervisor written in Go**. It ships
+as a single static ELF binary with zero runtime dependencies, is Linux-native,
+and tracks processes through cgroup v2. If you already use PM2, your workflow —
+`pm0 start`, `pm0 status`, `pm0 reload`, `ecosystem.config.js` — carries over
+without relearning anything.
+
+The design goal is simple: keep the parts of PM2 that people actually rely on
+(process management, cluster mode, log handling, startup persistence) and
+rebuild them without the overhead of a JavaScript runtime hosting the
+supervisor itself.
+
+## Why pm0
+
+The numbers below come from the published benchmark suite (same machine, same
+scripts, 100-run averages — see [Benchmarks](/docs/benchmarks)):
+
+| Scenario                        | PM2 7.0.4        | pm0               | Delta          |
+| ------------------------------- | ---------------- | ----------------- | -------------- |
+| Daemon idle RSS                 | 69 MB            | **16 MB**         | −77% memory    |
+| `list` @ 500 apps               | 245 ms           | **38.5 ms**       | 6.4× faster    |
+| Ecosystem start @ 500 apps      | 1.97 s / 139 MB  | **0.31 s / 78 MB**| 6.3× · −44% RSS|
+| 1,200 restart ops               | 238 ms/op / 290 s| **6.5 ms/op / 9.3 s** | 37× faster |
+| Log flood @ 100 MB/s            | 20.2% CPU        | **5.7% CPU**      | 3.6× less CPU  |
+| Cluster `-i 2` throughput       | 25.8k req/s      | **27.3k req/s**   | +6%            |
+| Idle CPU @ 0 apps               | 0.033%           | **0.033%**        | parity         |
+
+## What it looks like
+
+The command surface is intentionally familiar:
+
+```bash
+$ pm0 start api.js -i max
+$ pm0 status
+name │ id │ mode    │ pid  │ uptime │ ↺ │ status │ cpu  │ mem
+api  │ 0  │ cluster │ 7731 │ 12s    │ 0 │ online │ 0.0% │ 46.6mb
+api  │ 1  │ cluster │ 7738 │ 12s    │ 0 │ online │ 0.0% │ 46.6mb
+$ pm0 reload api
+```
+
+## Feature highlights
+
+- **Single static binary** — 16 MB ELF, no runtime, no interpreter, no
+  node_modules.
+- **Unix socket IPC** — CLI ↔ daemon roundtrip of ~0.3 ms with no V8 warmup.
+- **Kernel-level zero-downtime reloads** — SO_REUSEPORT cluster mode
+  (**Node.js only**, Node ≥ 23.2, kernel ≥ 3.9). Other runtimes run as fork
+  families with no shared port.
+- **cgroup v2 process tracking** — SIGINT → kill_timeout → SIGKILL through the
+  actor mailbox, with zero orphaned children.
+- **Built-in log rotation** — size-based copytruncate ring buffers, no external
+  module.
+- **Opt-in HTTP API** — REST + SSE streaming, off by default, loopback and
+  Unix-socket only.
+
+## Compatibility notes
+
+pm0 is honest about gaps. Zero-downtime cluster mode depends on Node.js
+SO_REUSEPORT support (Node ≥ 23.2), so it is labeled "Node.js only"
+everywhere it applies. The [HTTP API](/docs/http-api) is opt-in and has **no
+built-in auth** — your backend terminates authentication. For a full list of
+what PM2 has that pm0 doesn't yet, read
+[Migrating from PM2](/docs/migrating-from-pm2).
+
+## Next steps
+
+- <Card title="Installation" href="/docs/installation" description="Install via curl, direct binary, or build from source." />
+- <Card title="Quickstart" href="/docs/quickstart" description="Start, scale, reload, and persist your first app." />
+- <Card title="CLI Reference" href="/docs/cli/start" description="Every command with flags, aliases, and exit codes." />
+
+<Callout type="info" title="Repository">
+  pm0 is MIT-licensed and developed in the open at
+  [github.com/thakurdotdev/pm0](https://github.com/thakurdotdev/pm0).
+</Callout>

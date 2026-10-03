@@ -1,0 +1,81 @@
+---
+title: systemd Persistence
+description: Make pm0 and its processes survive reboots with pm0 startup, save, and a systemd unit.
+---
+
+pm0's daemon is a normal Linux process. To keep your apps running across
+reboots and daemon crashes, combine three commands with systemd.
+
+## The built-in path
+
+1. **Arrange your processes the way you want them restored** and snapshot:
+
+   ```bash
+   pm0 save
+   ```
+
+   This writes `$PM0_HOME/dump.pm0`.
+
+2. **Generate the boot integration:**
+
+   ```bash
+   pm0 startup
+   ```
+
+   The command prints a one-liner to run as root, which installs a systemd
+   unit that starts `pm0 resurrect` at boot. Run it, then verify:
+
+   ```bash
+   systemctl status pm0-root
+   ```
+
+3. **Reboot and confirm** the process list is back:
+
+   ```bash
+   pm0 status
+   ```
+
+## Manual systemd unit
+
+If you prefer to manage the unit yourself (or run pm0 under a dedicated user),
+this unit reproduces what `pm0 startup` installs:
+
+```ini
+# /etc/systemd/system/pm0.service
+[Unit]
+Description=pm0 process supervisor
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=deploy
+Environment=PM0_HOME=/home/deploy/.pm0
+ExecStart=/usr/local/bin/pm0 resurrect
+ExecStop=/usr/local/bin/pm0 kill
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now pm0.service
+```
+
+<Callout type="info" title="Save after every topology change">
+  `resurrect` restores exactly what `save` captured. Whenever you add, remove,
+  or scale processes, run `pm0 save` again — otherwise the next boot restores
+  a stale list.
+</Callout>
+
+## Daemon crashes
+
+If the daemon itself dies (OOM, kill -9), your apps keep running but lose
+their supervisor. Restarting the daemon re-adopts tracked processes via
+cgroup v2 membership where possible. For strict supervision of the daemon,
+add `Restart=on-failure` to the unit above with `Type=simple` running
+`pm0 daemon` in the foreground instead of the oneshot pattern.

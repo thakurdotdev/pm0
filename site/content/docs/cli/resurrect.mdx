@@ -1,0 +1,41 @@
+---
+title: pm0 resurrect
+description: Restore the saved process list — starts the daemon if needed and re-launches everything from dump.pm0.
+---
+
+Re-launch every process recorded in the last `pm0 save` snapshot
+(`$PM0_HOME/dump.pm0`). Starts the daemon first if it is not running.
+
+## Usage
+
+```bash
+pm0 resurrect [flags]
+```
+
+## Examples
+
+```bash
+pm0 resurrect                 # after a reboot or daemon crash
+pm0 resurrect --only api      # restore a subset
+```
+
+## Flags
+
+| Flag            | Description                                  |
+| --------------- | -------------------------------------------- |
+| `--only <names>`| Restore only these processes from the snapshot. |
+
+## Notes
+
+- This is the command `pm0 startup` wires into systemd at boot — the manual
+  path is documented in the [systemd guide](/docs/guides/systemd).
+- If the snapshot file is missing, resurrect exits non-zero and prints the
+  expected path.
+
+## Exit codes
+
+| Code | Meaning                              |
+| ---- | ------------------------------------ |
+| 0    | All snapshot processes restored      |
+| 1    | Runtime error (partial restore)      |
+| 2    | Snapshot missing or unreadable       |

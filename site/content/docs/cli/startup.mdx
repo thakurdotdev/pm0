@@ -1,0 +1,49 @@
+---
+title: pm0 startup
+description: Print the boot-persistence setup command — installs a systemd unit that resurrects pm0 at boot.
+---
+
+Configure boot persistence. The command prints a one-liner to run as root
+that installs a systemd unit starting `pm0 resurrect` at boot.
+
+## Usage
+
+```bash
+pm0 startup [flags]
+```
+
+## Example
+
+```bash
+$ pm0 startup
+[pm0] To setup the Startup Script, copy/paste the following command:
+sudo env PM0_HOME=/home/deploy/.pm0 /usr/local/bin/pm0 startup systemd -u deploy --write
+```
+
+Copy, paste, run. Verify with:
+
+```bash
+systemctl status pm0-deploy
+```
+
+## Flags
+
+| Flag              | Description                                        |
+| ----------------- | -------------------------------------------------- |
+| `systemd`         | Target init system (Linux default).                |
+| `-u, --user <u>`  | User context for the unit.                         |
+| `--write`         | Actually write the unit (the printed command includes it). |
+
+## Notes
+
+- Save a snapshot first: `pm0 save` → `pm0 startup` → run the printed
+  command → reboot to verify.
+- Undo with [`pm0 unstartup`](/docs/cli/unstartup).
+- Full walkthrough in the [systemd guide](/docs/guides/systemd).
+
+## Exit codes
+
+| Code | Meaning                        |
+| ---- | ------------------------------ |
+| 0    | Command printed / unit written |
+| 1    | Unsupported init system        |

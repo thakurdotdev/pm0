@@ -1,0 +1,101 @@
+---
+title: Installation
+description: Install pm0 with curl, as a system binary, or build from source (Go ≥ 1.26).
+---
+
+pm0 installs as a single static binary. Pick whichever path fits your
+environment — the result is identical: one `pm0` executable on your `PATH`.
+
+<Tabs items={["curl (user)", "sudo (system)", "binary", "source"]}>
+  <Tab value="curl (user)">
+    The install script auto-detects your architecture (amd64, arm64, arm, 386),
+    downloads the binary from GitHub Releases, and installs it to a user
+    directory.
+
+    ```bash
+    curl -fsSL https://pm0.thakur.dev/install.sh | bash
+    ```
+
+    <Callout type="info" title="PATH">
+      The script installs to `$PM0_HOME/bin` (default `~/.pm0/bin`) and prints
+      the exact `export PATH=...` line to add to your shell profile if the
+      directory is not already on your `PATH`.
+    </Callout>
+  </Tab>
+
+  <Tab value="sudo (system)">
+    Installing with sudo places `pm0` in `/usr/local/bin`, making it available
+    to all users and to systemd units.
+
+    ```bash
+    curl -fsSL https://pm0.thakur.dev/install.sh | sudo bash
+    ```
+  </Tab>
+
+  <Tab value="binary">
+    Download the binary for your architecture directly and install it manually.
+    Replace `amd64` with `arm64`, `arm`, or `386` as needed.
+
+    ```bash
+    curl -fsSL -o pm0 \
+      https://github.com/thakurdotdev/pm0/releases/latest/download/pm0-linux-amd64 \
+      && sudo install -m 0755 pm0 /usr/local/bin/pm0
+    ```
+
+    Tarballs (`pm0-linux-amd64.tar.gz` etc.) are also published per release.
+  </Tab>
+
+  <Tab value="source">
+    Building from source requires **Go ≥ 1.26**.
+
+    ```bash
+    git clone https://github.com/thakurdotdev/pm0.git
+    cd pm0
+    make build
+    sudo make install
+    ```
+  </Tab>
+</Tabs>
+
+## Verify your download
+
+Every release publishes a `checksums.txt` with SHA-256 digests for all assets.
+Verify before running anything you did not build yourself:
+
+```bash
+curl -fsSL https://github.com/thakurdotdev/pm0/releases/latest/download/checksums.txt \
+  | sha256sum -c -
+```
+
+The command above checks the file in the current working directory. Expected
+output for a good download:
+
+```bash
+pm0-linux-amd64: OK
+```
+
+<Callout type="warn" title="Non-zero exit code">
+  `sha256sum -c -` exits non-zero if any digest mismatches. Do not install a
+  binary that fails verification — report it in
+  [pm0 Issues](https://github.com/thakurdotdev/pm0/issues) instead.
+</Callout>
+
+## All release assets
+
+The table below is rendered live from the latest GitHub release — file names,
+sizes, and download links always match the current release.
+
+<ReleaseAssets />
+
+## After installation
+
+Confirm the binary works and print the version:
+
+```bash
+pm0 --version
+pm0 --help
+```
+
+To make the daemon survive reboots, continue to the
+[systemd guide](/docs/guides/systemd) or run `pm0 startup` (see
+[CLI Reference](/docs/cli/startup)).

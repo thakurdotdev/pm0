@@ -1,0 +1,45 @@
+---
+title: pm0 reload
+description: Zero-downtime rolling reload with rollback — always sequential by design, Node.js cluster only.
+---
+
+Reload a process by swapping workers one at a time with zero dropped
+connections. **Cluster mode is Node.js only** (Node ≥ 23.2, kernel ≥ 3.9).
+
+## Usage
+
+```bash
+pm0 reload <name> [flags]
+```
+
+## How it works
+
+1. Stop worker 0 (SIGINT, up to `kill_timeout`).
+2. Start its replacement and wait until it is online.
+3. Proceed to the next worker — one at a time.
+4. If a replacement fails to come up, **roll back** to the previous workers.
+
+Because at least one healthy worker always holds the shared SO_REUSEPORT
+socket, new connections never hit a closed port.
+
+## Flags
+
+| Flag                 | Description                                     |
+| -------------------- | ----------------------------------------------- |
+| `--kill-timeout <ms>`| Grace period before SIGKILL for each worker.    |
+| `--update-env`       | Re-read environment layers before reloading.    |
+
+## Why there is no --parallel
+
+`reload` exists to protect availability, so pm0 refuses to parallelize it.
+If you want wall-clock speed and accept downtime, use
+[`restart --parallel`](/docs/cli/restart).
+
+## Exit codes
+
+| Code | Meaning                                   |
+| ---- | ----------------------------------------- |
+| 0    | All workers reloaded                      |
+| 1    | Runtime error (rollback succeeded)        |
+| 2    | Usage error (fork mode cannot reload)     |
+| 127  | Process not found                         |

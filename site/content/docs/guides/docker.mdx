@@ -1,0 +1,58 @@
+---
+title: Docker
+description: Run pm0 inside containers — one process tree per container, cgroup caveats, and the PID 1 pattern.
+---
+
+pm0 in a container works well when you treat the container as one pm0
+"machine": the daemon runs inside, supervises your app processes, and the
+container exits when they do.
+
+## Basic pattern
+
+```dockerfile
+FROM debian:bookworm-slim
+
+# Install pm0 (static binary — no runtime deps)
+COPY --from=pm0-stage /pm0 /usr/local/bin/pm0
+# or: RUN curl -fsSL https://pm0.thakur.dev/install.sh | bash
+
+WORKDIR /app
+COPY . .
+
+# Start the daemon and your processes, then follow them
+CMD ["sh", "-c", "pm0 start ecosystem.config.js --env production && pm0 logs"]
+```
+
+## Caveats
+
+- **cgroup v2 inside containers** — process tracking relies on cgroup v2.
+  Most modern runtimes (containerd, Docker ≥ 20.10, gVisor with caveats)
+  delegate a cgroup subtree to the container, which is exactly what pm0
+  needs. If your runtime does not expose cgroup v2, pm0 falls back to PID
+  tracking.
+- **PID 1** — the daemon does not need to be PID 1; starting it via the shell
+  CMD is fine. Kill paths are scoped to the processes pm0 spawned, so
+  SIGTERM to PID 1 still stops the container normally.
+- **One daemon per container** — the Unix socket lives in `$PM0_HOME` inside
+  the container's filesystem. Do not share `$PM0_HOME` between containers;
+  each container is its own supervision domain.
+- **Logs** — either `pm0 logs` to follow output (as in the CMD above) or
+  mount `$PM0_HOME/logs` as a volume for shipping.
+
+## Health checks
+
+Use the CLI for liveness (it round-trips the daemon over the Unix socket):
+
+```dockerfile
+HEALTHCHECK --interval=30s --timeout=3s \
+  CMD pm0 ping || exit 1
+```
+
+For per-app HTTP health, point the check at your app's own endpoint instead —
+pm0's [HTTP API](/docs/http-api) is opt-in and loopback-only by design.
+
+## Rebuilds and zero-downtime
+
+Containers are the unit of deployment, so in-place `pm0 reload` is mostly
+useful inside a long-lived VM host, not for image swaps. For blue/green
+container deploys, see [Zero-Downtime Deploys](/docs/guides/zero-downtime-deploys).

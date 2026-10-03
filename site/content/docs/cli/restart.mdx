@@ -1,0 +1,43 @@
+---
+title: pm0 restart
+description: Full restart of pm0 processes — sequential by default, --parallel trades staggered downtime for speed.
+---
+
+Stop and start processes again. Unlike `reload`, a restart does not keep the
+old worker alive during the swap.
+
+## Usage
+
+```bash
+pm0 restart <name...> [flags]
+```
+
+## Examples
+
+```bash
+pm0 restart api
+pm0 restart api --parallel        # all workers at once (brief outage)
+pm0 restart api --update-env      # pick up new env vars
+```
+
+## Flags
+
+| Flag            | Description                                          |
+| --------------- | ---------------------------------------------------- |
+| `--parallel`    | Restart all workers simultaneously — trades staggered downtime for wall-clock speed. |
+| `--update-env`  | Re-read environment layers before restarting.        |
+| `--kill-timeout <ms>` | Grace period before SIGKILL.                   |
+
+## Notes
+
+- Kill path is SIGINT → kill_timeout → SIGKILL through the actor mailbox.
+- Without `--parallel`, workers restart one at a time (staggered downtime).
+- For zero-downtime Node.js reloads use [`pm0 reload`](/docs/cli/reload).
+
+## Exit codes
+
+| Code | Meaning                 |
+| ---- | ----------------------- |
+| 0    | Restarted               |
+| 1    | Runtime error           |
+| 127  | Process not found       |

@@ -1,0 +1,72 @@
+---
+title: Migrating from PM2
+description: Command mapping from PM2 to pm0, behavior differences, and what pm0 does not support yet.
+---
+
+pm0 is a drop-in replacement for the core PM2 workflow. Most muscle memory
+transfers 1:1. This page maps the commands and lists the differences honestly —
+including what pm0 cannot do yet.
+
+## Command mapping
+
+| PM2 command                     | pm0 equivalent          | Notes                                          |
+| ------------------------------- | ----------------------- | ---------------------------------------------- |
+| `pm2 start app.js`              | `pm0 start app.js`      | Same. Auto-detects the runtime.                |
+| `pm2 start app.js -i max`       | `pm0 start app.js -i max` | Cluster mode is **Node.js only** (Node ≥ 23.2). |
+| `pm2 status` / `pm2 ls`         | `pm0 status`            | Same table shape.                              |
+| `pm2 logs <app>`                | `pm0 logs <app>`        | `--err`, `--lines N` supported.                |
+| `pm2 describe <app>`            | `pm0 describe <app>`    | Full process details.                          |
+| `pm2 scale <app> N`             | `pm0 scale <app> N`     | Grow/shrink a cluster.                         |
+| `pm2 reload <app>`              | `pm0 reload <app>`      | Always sequential (zero-downtime + rollback).  |
+| `pm2 restart <app>`             | `pm0 restart <app>`     | `--parallel` available.                        |
+| `pm2 stop <app>`                | `pm0 stop <app>`        | SIGINT → kill_timeout → SIGKILL.               |
+| `pm2 delete <app>`              | `pm0 delete <app>`      | `--parallel` available.                        |
+| `pm2 save`                      | `pm0 save`              | Snapshot to `$PM0_HOME/dump.pm0`.              |
+| `pm2 resurrect`                 | `pm0 resurrect`         | Restore the snapshot.                          |
+| `pm2 startup`                   | `pm0 startup`           | Prints the systemd integration command.        |
+| `pm2 ecosystem`                 | —                       | Write `ecosystem.config.js` by hand — pm0 reads your existing file. |
+| `pm2 monit`                     | —                       | Not available; use the [HTTP API](/docs/http-api) + your tooling. |
+| `pm2 jlist`                     | `pm0 jlist`             | JSON output for scripts.                       |
+| `pm2 ping`                      | `pm0 ping`              | Daemon liveness check.                         |
+| `pm2 kill`                      | `pm0 kill`              | Stop the daemon and all processes.             |
+| `pm2 unstartup`                 | `pm0 unstartup`         | Remove the boot integration.                   |
+
+## Behavior differences
+
+- **CLI speed** — pm0 talks to the daemon over a Unix socket (≈0.3 ms
+  roundtrip) with no V8 warmup. `list` at 500 apps answers in 38.5 ms vs
+  PM2's 245 ms.
+- **Kill paths** — process tracking uses cgroup v2, so killing a supervisor
+  process also reaps its children. No orphans.
+- **Log rotation** — built-in size-based copytruncate ring buffers. You do not
+  need `pm2-logrotate`.
+- **HTTP API** — pm0's API is **off by default** and, when enabled, listens on
+  loopback or a Unix socket only. PM2 exposes port 9615 by default once
+  launched.
+- **`reload` is always sequential** — pm0 refuses to parallelize reloads by
+  design, because reload exists for zero-downtime with rollback. `stop`,
+  `restart`, and `delete` accept `--parallel` if you prefer wall-clock speed
+  over staggered downtime.
+- **Idle footprint** — 16 MB daemon RSS vs PM2's 69 MB; idle CPU at 0 apps is
+  parity (0.033%).
+
+## Not yet supported
+
+<Callout type="warn" title="Honest gaps">
+  TODO(DATA): verify this list against the pm0 README before shipping — it
+  should always match the project's own "differences" statement.
+</Callout>
+
+- **Windows and macOS** — pm0 is Linux-native (cgroup v2). PM2 runs anywhere
+  Node.js runs.
+- **Module ecosystem** — no `pm2-logrotate`, `pm2-server-monit`, or
+  `pm2.io`-style remote monitoring. Log rotation is built in; monitoring is
+  up to your tooling via the HTTP API or `pm0 jlist`.
+- **Older Node versions for cluster mode** — SO_REUSEPORT reload requires
+  Node ≥ 23.2 and kernel ≥ 3.9. PM2's cluster mode supports older Node lines.
+- **`pm2 deploy`** — no built-in deploy pipeline; pair pm0 with your CI/CD
+  (see the [CI/CD guide](/docs/guides/cicd)).
+
+If one of these blocks you, please open an issue on
+[GitHub](https://github.com/thakurdotdev/pm0/issues) — the roadmap is driven by
+real usage.
