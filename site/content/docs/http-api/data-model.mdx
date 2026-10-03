@@ -1,0 +1,148 @@
+---
+title: Data Model
+description: The pm0 process object (jlist shape), monit, pm2_env, status vocabulary, selectors, and error codes.
+---
+
+List and describe endpoints return the PM2-compatible object — identical to the
+JSON `pm0 jlist` prints.
+
+## Process object
+
+Each element has exactly these top-level keys:
+
+<TypeTable
+  type={{
+    pid: { type: "number", description: "OS pid (0 when not running)." },
+    name: { type: "string", description: "App name. Cluster instances share the name; fork families are <name>-<i>." },
+    pm_id: { type: "number", description: "Stable supervisor id." },
+    monit: { type: "object", description: "{ memory, cpu } — see below." },
+    pm2_env: { type: "object", description: "Full environment/config + runtime — see below." },
+  }}
+/>
+
+## `monit`
+
+| Key      | Type   | Meaning                                                       |
+| -------- | ------ | ------------------------------------------------------------- |
+| `memory` | number | RSS of the **process tree** in bytes                          |
+| `cpu`    | number | Percent of one core (first sample after start may read `0`)   |
+
+## Status vocabulary
+
+Processes report one of these statuses:
+
+| Status             | Meaning                                                      |
+| ------------------ | ------------------------------------------------------------ |
+| `launching`        | Process is starting up                                       |
+| `online`           | Process is running and healthy                               |
+| `stopped`          | Manually stopped (state preserved)                           |
+| `stopping`         | Stop in progress                                             |
+| `waiting restart`  | Inside a `restart_delay` / backoff window                    |
+| `errored`          | Crash-loop exhausted `max_restarts`                          |
+
+## `pm2_env` (selected keys)
+
+The `pm2_env` object contains the full process configuration and runtime state.
+Key fields include:
+
+| Key | Type | Notes |
+| --- | ---- | ----- |
+| `name` | string | App name |
+| `namespace` | string | Namespace |
+| `pm_id` | number | Supervisor ID |
+| `status` | string | Current status (see vocabulary above) |
+| `pm_exec_path` | string | The **script** path (never the interpreter) |
+| `args` | string[] | Always `[]`, never `null` |
+| `pm_cwd` | string | Working directory |
+| `pm_out_log_path` | string | stdout log file path |
+| `pm_err_log_path` | string | stderr log file path |
+| `pm_pid_path` | string | PID file path |
+| `interpreter` | string | Interpreter binary |
+| `exec_interpreter` | string | Same value as `interpreter` |
+| `interpreter_args` | string[] | Same list as `node_args` |
+| `node_args` | string[] | Same list as `interpreter_args` |
+| `exec_mode` | string | `fork_mode` \| `cluster_mode` |
+| `instances` | number | Instance count |
+| `autorestart` | boolean | Restart on exit |
+| `max_restarts` | number | Crash-loop budget |
+| `min_uptime` | number | Stable-run threshold (ms) |
+| `max_memory_restart` | number | Memory restart threshold |
+| `kill_signal` | string | Signal sent on stop |
+| `kill_timeout` | number | Grace period (ms) |
+| `wait_ready` | boolean | Wait for ready signal |
+| `listen_timeout` | number | Listen timeout (ms) |
+| `cron_restart` | string | Cron expression |
+| `watch` | boolean | File-watch restart |
+| `exp_backoff_restart_delay` | number | Exponential backoff delay |
+| `stop_exit_codes` | number[] | Exit codes that park as `stopped` |
+| `restart_time` | number | Total restart count |
+| `unstable_restarts` | number | Unstable restart count |
+| `created_at` | number | Epoch milliseconds |
+| `pm_uptime` | number | Epoch milliseconds |
+| `exit_code` | number \| null | `null` while running and for signal deaths |
+| `treekill` | boolean | Always `true` |
+| `env` | object | Full child environment |
+
+### Presence / null rules
+
+These match PM2 behavior exactly:
+
+- `exit_code` is `null` while running and for signal deaths.
+- `created_at` is `null` after a crash-loop parks the app `errored`.
+- `args` and `interpreter_args` are `[]`, never `null`.
+
+### Timestamps
+
+`created_at` and `pm_uptime` are **epoch milliseconds**. Compute uptime as:
+
+```js
+const uptime = Date.now() - proc.pm2_env.pm_uptime;
+```
+
+### Environment and redaction
+
+`pm2_env.env` is the **full child environment** (daemon env merged with the
+app's `env`), matching PM2 behavior. If that is undesirable, run the daemon
+with `--redact-env`: secret-looking values are replaced before they reach the
+API (also in `dump.json`).
+
+For cluster apps a `NODE_APP_INSTANCE` key is present.
+
+---
+
+## Selectors
+
+The `{target}` path segment in endpoints accepts:
+
+| Value | Resolves to |
+| ----- | ----------- |
+| `3` (digits) | The app with `pm_id = 3` |
+| `web` | Exact name matches **and** the family `web-0..web-N` |
+| `all` | Every supervised app |
+
+Selectors are resolved server-side identically to the CLI, so dashboard
+actions behave the same as `pm0 restart web`, etc.
+
+---
+
+## Error responses
+
+Every error body is `{"error":"<message>"}`. The gRPC status is mapped onto
+HTTP:
+
+| HTTP | When |
+| ---- | ---- |
+| `200` | Success |
+| `400` | Invalid argument — bad spec, missing `script`/name, bad JSON |
+| `404` | No app matched the selector |
+| `405` | Wrong method for the path |
+| `409` | Already exists |
+| `429` | Resource exhausted |
+| `500` | Internal error |
+| `503` | Daemon unavailable |
+
+<Callout type="info" title="Partial batch failures">
+  On a partial batch failure during start, the registered apps are still returned
+  with `200` (failures are registered, parked `errored`) — the response list
+  reflects the truth. Re-list to reconcile.
+</Callout>

@@ -1,0 +1,139 @@
+---
+title: Integration Example
+description: A typed Node/TypeScript client for the pm0 HTTP API and an Express proxy with authentication — ready to copy into your project.
+---
+
+The recommended topology: your backend talks to the pm0 daemon on `127.0.0.1`
+(or a UDS) and re-exposes a **narrow, authenticated** API to the dashboard. Do
+not let a browser hit the daemon directly.
+
+## Typed client (Node / TypeScript)
+
+A thin wrapper around `fetch` for the local pm0 HTTP API:
+
+```ts
+// pm0.ts — typed client for the local pm0 HTTP API.
+const BASE = process.env.PM0_API ?? "http://127.0.0.1:9615/api/v1";
+
+export interface Proc {
+  pid: number;
+  name: string;
+  pm_id: number;
+  monit: { memory: number; cpu: number };
+  pm2_env: { status: string; pm_uptime: number; [k: string]: unknown };
+}
+
+async function call(method: string, path: string, body?: unknown) {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: body ? { "content-type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok)
+    throw new Error(
+      `pm0 ${method} ${path}: ${res.status} ${await res.text()}`
+    );
+  return res.json();
+}
+
+export const pm0 = {
+  list: (): Promise<Proc[]> => call("GET", "/processes"),
+  describe: (t: string): Promise<Proc> => call("GET", `/processes/${t}`),
+  start: (spec: unknown) => call("POST", "/processes", spec),
+  stop: (t: string) => call("POST", `/processes/${t}/stop`),
+  restart: (t: string, env?: Record<string, string>) =>
+    call("POST", `/processes/${t}/restart`, env ? { env } : undefined),
+  reload: (t: string) => call("POST", `/processes/${t}/reload`),
+  remove: (t: string) => call("DELETE", `/processes/${t}`),
+  scale: (name: string, delta: number) =>
+    call("POST", "/scale", { name, delta }),
+};
+```
+
+## Express proxy (with auth)
+
+Proxy your own routes onto the pm0 client — add your auth middleware before
+these routes:
+
+```ts
+import express from "express";
+import { pm0 } from "./pm0";
+
+const app = express();
+app.use(express.json());
+
+// --- add your auth middleware here before these routes ---
+
+app.get("/api/processes", async (_req, res, next) => {
+  try {
+    res.json(await pm0.list());
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post(
+  "/api/processes/:target/:action(restart|reload|stop)",
+  async (req, res, next) => {
+    try {
+      const { target, action } = req.params;
+      res.json(await (pm0 as any)[action](target));
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+// Stream logs: proxy the SSE body straight through.
+app.get("/api/processes/:target/logs", async (req, res) => {
+  const up = await fetch(
+    `${process.env.PM0_API ?? "http://127.0.0.1:9615/api/v1"}/processes/${
+      req.params.target
+    }/logs?${new URLSearchParams(req.query as any)}`
+  );
+  res.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+  });
+  up.body!.pipeTo(
+    new WritableStream({ write: (c) => void res.write(c) })
+  );
+});
+
+app.listen(8080);
+```
+
+<Callout type="info" title="Bun alternative">
+  For Bun, replace the listener with `Bun.serve({ port: 8080, fetch })`.
+</Callout>
+
+## Usage examples
+
+With the proxy running, interact through your authenticated layer:
+
+```bash
+# list all processes
+curl -s http://localhost:8080/api/processes | jq
+
+# restart a process
+curl -s -X POST http://localhost:8080/api/processes/web/restart
+
+# stream logs
+curl -N http://localhost:8080/api/processes/web/logs
+```
+
+## Notes and limitations
+
+- **Off by default.** Nothing listens unless `PM0_HTTP_ADDR` (env or
+  `$PM0_HOME/config`) enables it.
+- **One HTTP port per host, per daemon.** If you run several daemons (distinct
+  `PM0_HOME`s), give each its own port or Unix socket.
+- **One daemon per `PM0_HOME` per user.** The HTTP API is served by that same
+  daemon; there is no separate server.
+- **The gRPC API remains the primary contract.** This HTTP layer is a facade
+  over the same methods; anything not exposed here (e.g. `UpdateDaemon`,
+  `KillDaemon`) is intentionally left to the CLI/SDK.
+- **Cluster apps share a name.** `web` with `instances: 4` yields four rows
+  all named `web`, distinguished by `pm_id` / `pm2_env.NODE_APP_INSTANCE`.
+  Fork families are `web-0..web-3`.

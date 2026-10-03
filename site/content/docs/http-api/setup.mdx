@@ -1,0 +1,100 @@
+---
+title: Setup & Configuration
+description: Enable the pm0 HTTP API via environment variable, config file, or the installer — with systemd and Unix socket options.
+---
+
+The HTTP API is **off by default** — pm0 opens no HTTP port unless you
+explicitly enable it.
+
+## Enabling the API
+
+### Environment variable
+
+Start (or restart) the daemon with `PM0_HTTP_ADDR`:
+
+```bash
+pm0 kill
+PM0_HTTP_ADDR=127.0.0.1:9615 pm0 daemon
+```
+
+### Daemon flag
+
+Run the daemon in the foreground with the `--http-addr` flag:
+
+```bash
+pm0 daemon --http-addr 127.0.0.1:9615
+```
+
+### Config file (persistent)
+
+The daemon is long-lived and usually auto-spawned. To make the choice permanent
+without editing a shell profile, add it to pm0's config file:
+
+```bash
+# ~/.pm0/config  (or $PM0_HOME/config)
+PM0_HTTP_ADDR=127.0.0.1:9615
+```
+
+**Resolution order:** the `PM0_HTTP_ADDR` environment variable wins, then the
+`PM0_HTTP_ADDR` line in `$PM0_HOME/config`, otherwise **off**.
+
+### Installer prompt
+
+`curl -fsSL https://pm0.thakur.dev/install.sh | bash` asks whether to enable
+the API (`[y/N]`, default No; loopback `127.0.0.1:9615` only). Answering `y`
+writes `PM0_HTTP_ADDR=127.0.0.1:9615` to `$PM0_HOME/config`, so the daemon
+picks it up on its next start.
+
+Non-interactive installs (no TTY, e.g. CI) skip the prompt. Pre-answer with
+`PM0_HTTP=1` (enable) / `PM0_HTTP=0` (disable), or export `PM0_HTTP_ADDR`
+yourself.
+
+<Callout type="info" title="The installer doesn't start a daemon">
+  On a fresh install the daemon starts on your first `pm0` command, or at boot
+  via `pm0 startup`.
+</Callout>
+
+## Address formats
+
+`PM0_HTTP_ADDR` accepts:
+
+| Format | Example | Notes |
+| ------ | ------- | ----- |
+| TCP address | `127.0.0.1:9615` | Loopback recommended |
+| Unix socket | `unix:/run/pm0-http.sock` | Created with mode `0600` |
+| Disable | `off` | Also `none`, `disabled`, `false`, `0` |
+
+<Callout type="warn" title="Never bind to 0.0.0.0">
+  The daemon has no authentication. Binding to a public interface exposes
+  full process control to anyone who can reach the port.
+</Callout>
+
+## Running as a systemd service
+
+If you manage pm0 with a systemd unit (`pm0 startup`), enable the API in the
+unit file — the service does not read the shell environment:
+
+```ini
+[Service]
+Environment=PM0_HTTP_ADDR=127.0.0.1:9615
+ExecStart=/usr/local/bin/pm0 daemon
+```
+
+Alternatively, the `$PM0_HOME/config` file is read regardless of how the daemon
+starts, so it works as a drop-in without editing the unit.
+
+## Verifying
+
+```bash
+pm0 ping                                      # gRPC control still works
+curl -s http://127.0.0.1:9615/api/v1/health   # HTTP health (when enabled)
+```
+
+## Notes
+
+- The setting is read at daemon boot — restart the daemon (`pm0 kill` then any
+  command) or run `pm0 update` for a change to take effect.
+- One HTTP port per host, per daemon. If you run several daemons (distinct
+  `PM0_HOME`s), give each its own port or Unix socket.
+- `9615` is the documented default, but `PM0_HTTP_ADDR` accepts any local
+  address or a UDS.

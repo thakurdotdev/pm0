@@ -1,0 +1,13 @@
+{
+  "title": "HTTP API",
+  "description": "REST + SSE HTTP API reference — endpoints, data model, security, and integration.",
+  "defaultOpen": false,
+  "pages": [
+    "index",
+    "setup",
+    "endpoints",
+    "data-model",
+    "security",
+    "integration"
+  ]
+}

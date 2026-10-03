@@ -1,0 +1,341 @@
+---
+title: Endpoints
+description: Full reference for every pm0 HTTP API endpoint — health, list, describe, start, stop, restart, reload, delete, scale, logs, save, and resurrect.
+---
+
+All endpoints are under the `/api/v1` base path. Requests and responses are
+JSON. The `{target}` path segment is a [selector](/docs/http-api/data-model#selectors):
+a `pm_id`, app name, or `"all"`.
+
+## Health
+
+### `GET /api/v1/health`
+
+Daemon liveness and metadata (backed by the gRPC `Ping`).
+
+```bash
+curl -s http://127.0.0.1:9615/api/v1/health
+```
+
+```json
+{
+  "ok": true,
+  "version": "1.0.1",
+  "commit": "abc1234",
+  "pid": 7712,
+  "kill_mode": "cgroup-kill",
+  "kernel_release": "6.6.0",
+  "cgroup_warning": ""
+}
+```
+
+<TypeTable
+  type={{
+    ok: { type: "boolean", description: "Always true on success." },
+    version: { type: "string", description: "pm0 version." },
+    commit: { type: "string", description: "Git commit hash of the build." },
+    pid: { type: "number", description: "Daemon process ID." },
+    kill_mode: { type: "string", description: "One of cgroup-kill, cgroup-freeze, pgid." },
+    kernel_release: { type: "string", description: "Linux kernel version." },
+    cgroup_warning: { type: "string", description: "Non-empty when cgroup accounting is degraded." },
+  }}
+/>
+
+---
+
+## Processes — List
+
+### `GET /api/v1/processes`
+
+List every supervised app. Returns the **PM2-compatible `jlist` array** — the
+exact JSON `pm0 jlist` prints. See [Data Model](/docs/http-api/data-model) for
+the field reference.
+
+```bash
+curl -s http://127.0.0.1:9615/api/v1/processes
+```
+
+```json
+[
+  {
+    "pid": 7731,
+    "name": "web-0",
+    "pm_id": 0,
+    "monit": { "memory": 48896000, "cpu": 0.4 },
+    "pm2_env": { "name": "web-0", "status": "online", "pm_id": 0 }
+  }
+]
+```
+
+An empty app set returns `[]` (never `null`).
+
+---
+
+## Processes — Describe
+
+### `GET /api/v1/processes/{target}`
+
+Describe one app in full (same object shape as one element of the list). On an
+instance family the lowest `pm_id` wins, matching `pm0 describe`.
+
+```bash
+curl -s http://127.0.0.1:9615/api/v1/processes/web
+curl -s http://127.0.0.1:9615/api/v1/processes/0
+```
+
+```json
+{
+  "pid": 7731,
+  "name": "web-0",
+  "pm_id": 0,
+  "monit": { "memory": 48896000, "cpu": 0.4 },
+  "pm2_env": { "name": "web-0", "status": "online", "pm_id": 0 }
+}
+```
+
+Missing app → `404` with `{"error":"no matching app"}`.
+
+---
+
+## Processes — Start
+
+### `POST /api/v1/processes`
+
+Start one or more apps. The body accepts three shapes:
+
+```jsonc
+// (a) a single spec
+{ "script": "app.js", "name": "web", "instances": 2 }
+
+// (b) a wrapper with a specs array
+{ "specs": [ { "script": "a.js" }, { "script": "b.js" } ] }
+
+// (c) a bare array
+[ { "script": "a.js" }, { "script": "b.js" } ]
+```
+
+**Response:** `200` with a jlist array of the started apps (same shape as the
+list endpoint). `script` is required; a missing or blocked interpreter fails
+with `400`.
+
+```bash
+curl -s -X POST http://127.0.0.1:9615/api/v1/processes \
+  -H 'Content-Type: application/json' \
+  -d '{"script":"app.js","name":"web","instances":2,"env":{"PORT":"3000"}}'
+```
+
+### ProcessSpec fields
+
+These are the fields accepted in the request body. Both `snake_case` and
+`lowerCamelCase` names are accepted (decoded from `daemon.proto`).
+
+<TypeTable
+  type={{
+    name: { type: "string", description: "App name.", default: "script basename" },
+    script: { type: "string", description: "Path to script/binary.", required: true },
+    args: { type: "string[]", description: "Arguments passed to the script.", default: "[]" },
+    interpreter: { type: "string", description: "\"\" = auto-detect, \"none\" = exec directly, else a binary (node, bun, python3, …).", default: "auto" },
+    interpreter_args: { type: "string[]", description: "Args for the interpreter.", default: "[]" },
+    cwd: { type: "string", description: "Working directory.", default: "daemon cwd" },
+    env: { type: "object", description: "Extra environment variables (merged over the daemon env).", default: "{}" },
+    instances: { type: "number", description: "1 = single fork; >1 = cluster (Node) or <name>-0..N-1 fork family.", default: "1" },
+    exec_mode: { type: "\"fork\" | \"cluster\"", description: "Cluster needs a Node interpreter.", default: "\"fork\"" },
+    autorestart: { type: "boolean", description: "Restart on exit.", default: "true" },
+    kill_signal: { type: "string", description: "Signal sent on stop.", default: "SIGINT" },
+    kill_timeout_ms: { type: "number", description: "Grace period before force kill (ms).", default: "1600" },
+    max_restarts: { type: "number", description: "Crash-loop budget.", default: "16" },
+    min_uptime_ms: { type: "number", description: "Stable-run threshold (ms).", default: "1000" },
+    max_memory_restart_bytes: { type: "number", description: "Auto-restart on memory. 0 = off.", default: "0" },
+    cron_restart: { type: "string", description: "Cron expression for periodic restarts.", default: "—" },
+    watch: { type: "boolean", description: "Restart on file changes.", default: "false" },
+    stop_exit_codes: { type: "number[]", description: "Exit codes that park the app as stopped.", default: "[]" },
+    out_file: { type: "string", description: "stdout log path.", default: "~/.pm0/logs" },
+    error_file: { type: "string", description: "stderr log path.", default: "~/.pm0/logs" },
+    pid_file: { type: "string", description: "PID file path.", default: "~/.pm0/pids" },
+    log_rotate_max_bytes: { type: "number", description: "0 = default (10 MiB), -1 = off.", default: "0" },
+    log_rotate_retain: { type: "number", description: "Number of rotated log files to keep.", default: "30" },
+    health_check_cmd: { type: "string", description: "sh -c probe while online.", default: "—" },
+  }}
+/>
+
+<Callout type="info" title="Boolean fields">
+  Boolean fields cannot be distinguished as "unset" on the wire. Send the values
+  you want explicitly (e.g. `"autorestart": true`).
+</Callout>
+
+---
+
+## Processes — Stop
+
+### `POST /api/v1/processes/{target}/stop`
+
+Stop (state is kept; status becomes `stopped`). Idempotent on stopped apps.
+
+```bash
+curl -s -X POST http://127.0.0.1:9615/api/v1/processes/web/stop
+```
+
+```json
+{ "ok": true, "affected_pm_ids": [0, 1] }
+```
+
+---
+
+## Processes — Restart
+
+### `POST /api/v1/processes/{target}/restart`
+
+Stop + start, preserving `pm_id` and config. Send `{"env":{...}}` to restart
+with an updated environment (the `pm0 restart --update-env` behavior); omit
+the body for a plain restart.
+
+```bash
+# plain restart
+curl -s -X POST http://127.0.0.1:9615/api/v1/processes/web/restart
+
+# restart with updated env
+curl -s -X POST http://127.0.0.1:9615/api/v1/processes/web/restart \
+  -H 'Content-Type: application/json' -d '{"env":{"PORT":"4000"}}'
+```
+
+```json
+{ "ok": true, "affected_pm_ids": [0, 1] }
+```
+
+---
+
+## Processes — Reload
+
+### `POST /api/v1/processes/{target}/reload`
+
+Rolling, zero-downtime reload — one instance at a time, health-gated,
+cluster-aware. Names resolve to the whole family and are rolled in instance
+order.
+
+```bash
+curl -s -X POST http://127.0.0.1:9615/api/v1/processes/web/reload
+```
+
+```json
+{ "ok": true, "affected_pm_ids": [0, 1] }
+```
+
+---
+
+## Processes — Delete
+
+### `DELETE /api/v1/processes/{target}`
+
+Stop (if running) and **forget** the app; its `pm_id` may be reused.
+
+```bash
+curl -s -X DELETE http://127.0.0.1:9615/api/v1/processes/web
+```
+
+```json
+{ "ok": true, "affected_pm_ids": [0, 1] }
+```
+
+---
+
+## Scaling
+
+Two equivalent forms:
+
+- `POST /api/v1/processes/{target}/scale` — name from the path
+- `POST /api/v1/scale` — name from the body
+
+**Body/`delta` semantics:** `+N` adds instances, `-N` removes the highest-index
+ones, `0` is a no-op that reports the family.
+
+```bash
+# scale the "web" family up by 2
+curl -s -X POST http://127.0.0.1:9615/api/v1/processes/web/scale \
+  -H 'Content-Type: application/json' -d '{"delta": 2}'
+
+# equivalent, name in the body
+curl -s -X POST http://127.0.0.1:9615/api/v1/scale \
+  -H 'Content-Type: application/json' -d '{"name":"web","delta":-1}'
+```
+
+```json
+{ "ok": true, "affected_pm_ids": [2, 3] }
+```
+
+---
+
+## Logs (Server-Sent Events)
+
+### `GET /api/v1/processes/{target}/logs`
+
+Streams logs as SSE. Each frame is `data: <json>\n\n` where `<json>` is:
+
+```json
+{ "pm_id": 0, "name": "web-0", "stream": "stdout", "data": "line text" }
+```
+
+`stream` is `"stdout"` or `"stderr"`. A terminal error is delivered as an
+`event: error` frame; a leading `: pm0 log stream` comment flushes headers.
+
+### Query parameters
+
+| Param    | Default | Meaning                                                |
+| -------- | ------- | ------------------------------------------------------ |
+| `lines`  | `100`   | Backlog lines from the ring buffer (`0` = live only)   |
+| `follow` | `true`  | Keep streaming live lines after the backlog             |
+| `stderr` | `false` | Include stderr (separate sinks are filtered otherwise)  |
+| `raw`    | `false` | Emit lines without the `name: ` prefix                 |
+
+```bash
+# follow web's stdout live
+curl -N http://127.0.0.1:9615/api/v1/processes/web/logs
+
+# last 200 lines of stdout+stderr, then close
+curl -N 'http://127.0.0.1:9615/api/v1/processes/web/logs?lines=200&stderr=true&follow=false'
+```
+
+### Browser / Node consumer
+
+```js
+const es = new EventSource(
+  "http://127.0.0.1:9615/api/v1/processes/web/logs?lines=100"
+);
+es.onmessage = (e) => {
+  const line = JSON.parse(e.data); // { pm_id, name, stream, data }
+  console.log(line.name, line.data);
+};
+```
+
+<Callout type="info" title="Reverse proxy note">
+  Behind a reverse proxy, disable response buffering for this route
+  (`proxy_buffering off;` in nginx). The daemon already sends
+  `X-Accel-Buffering: no`.
+</Callout>
+
+---
+
+## Daemon — Save & Resurrect
+
+### `POST /api/v1/daemon/save`
+
+Persist the current app set to `dump.json`.
+
+```bash
+curl -s -X POST http://127.0.0.1:9615/api/v1/daemon/save
+```
+
+```json
+{ "ok": true, "dump_path": "/home/me/.pm0/dump.json", "saved_count": 2 }
+```
+
+### `POST /api/v1/daemon/resurrect`
+
+Adopt and start from the saved `dump.json`.
+
+```bash
+curl -s -X POST http://127.0.0.1:9615/api/v1/daemon/resurrect
+```
+
+```json
+{ "ok": true, "started_count": 2, "errored_count": 0 }
+```

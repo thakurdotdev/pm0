@@ -1,0 +1,70 @@
+---
+title: Security Model
+description: The pm0 HTTP API security model — no built-in auth, loopback-only binding, and how to add authentication in your backend.
+---
+
+<Callout type="warn" title="Read this before exposing anything">
+  The pm0 daemon is a **trusted, unauthenticated control plane**. Whoever can
+  talk to the socket/port can start, stop, and delete processes as the user
+  running the daemon.
+</Callout>
+
+## Design principles
+
+The HTTP API is deliberately **unauthenticated**. It is meant to be reachable
+only locally — authentication belongs in your backend, not in a process
+supervisor.
+
+### No built-in auth
+
+There are no tokens, no TLS, no API keys. The address space *is* the auth
+boundary.
+
+### Loopback / Unix socket only
+
+Use `127.0.0.1:PORT` (loopback only) or `unix:/path.sock` (filesystem `0600`).
+Both are unreachable from the network unless a proxy exposes them.
+
+### Your backend terminates auth
+
+The intended topology:
+
+```
+browser/dashboard ──HTTP(auth)──► your backend service ──HTTP──► pm0 daemon
+                                    (same host, 127.0.0.1)       (127.0.0.1 / UDS)
+```
+
+Your backend terminates TLS + auth and re-exposes a narrow, permissioned API.
+The pm0 daemon is never exposed publicly.
+
+### Run as the right user
+
+The caller must run as the same user that owns `PM0_HOME` (default `~/.pm0`),
+or both must share a `PM0_HOME`. This is how the process/kill authority is
+scoped.
+
+## Environment secrets
+
+`pm2_env.env` contains the **full child environment**. If you do not want to
+serve secrets, run the daemon with `--redact-env` (or the `redact_env` policy).
+This scrubs secret-looking values from jlist/describe/dump.
+
+```bash
+# start the daemon with redacted environments
+PM0_HTTP_ADDR=127.0.0.1:9615 pm0 daemon --redact-env
+```
+
+## Auth checklist
+
+When building a dashboard or remote-access layer:
+
+- ✅ Put a real auth layer (session / JWT / API key) in front of the
+  dashboard-facing routes.
+- ✅ Bind the pm0 API to loopback only (`127.0.0.1` or Unix socket).
+- ✅ Restrict who can `start` / `delete` (those are the most powerful actions).
+- ✅ Consider running the daemon as a dedicated user with its own `PM0_HOME`,
+  so the API can only supervise that user's apps.
+- ✅ Use `--redact-env` if the child environment contains secrets you don't want
+  served through the API.
+- ❌ Never bind to `0.0.0.0` or a public interface.
+- ❌ Never expose the daemon port directly to the internet.

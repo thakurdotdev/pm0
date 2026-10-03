@@ -1,0 +1,80 @@
+---
+title: HTTP API Overview
+description: pm0's opt-in REST + SSE HTTP API — a JSON transport adapter over the gRPC daemon service for dashboards, CI/CD hooks, and health probes.
+---
+
+pm0 ships an **opt-in** HTTP/REST control plane for the daemon. It exposes
+the same capabilities as the CLI and the gRPC SDK — list processes, act on them
+(start, stop, restart, reload, delete, scale), and stream logs — as plain JSON
+over HTTP so dashboards, monitoring tools, and CI/CD hooks can consume it.
+
+<Callout type="warn" title="Opt-in and off by default">
+  The HTTP API is **disabled unless you enable it explicitly**. pm0 opens no
+  HTTP port unless you ask. There is **no built-in authentication** — the
+  listener binds to loopback or a Unix socket only.
+</Callout>
+
+## Architecture
+
+This is a **transport adapter** over the existing gRPC `pm0.v1.Daemon` service.
+Every handler calls the same server methods the CLI uses, so process-control
+semantics — selectors, name families, rolling reload, kill paths, log
+buffering — are identical. There is no second implementation to drift.
+
+```
+browser/dashboard ──HTTP(auth)──► your backend ──HTTP──► pm0 daemon
+                                   (same host)           (127.0.0.1 / UDS)
+```
+
+## Quick start
+
+```bash
+# restart the daemon so it picks up the variable
+pm0 kill
+PM0_HTTP_ADDR=127.0.0.1:9615 pm0 daemon
+
+# from another shell
+curl -s http://127.0.0.1:9615/api/v1/health
+curl -s http://127.0.0.1:9615/api/v1/processes
+```
+
+Verify the gRPC control plane still works alongside:
+
+```bash
+pm0 ping                                      # gRPC control
+curl -s http://127.0.0.1:9615/api/v1/health   # HTTP health
+```
+
+## Base URL and conventions
+
+- Base path: **`/api/v1`**
+- Requests and responses are JSON (`Content-Type: application/json`).
+- All `{target}` path segments are a **selector**: a `pm_id` (`"3"`), an app
+  name (`"web"`, which resolves the whole family), or `"all"`.
+- Mutating endpoints that are only meaningful with a body accept an empty body.
+- Field names in request bodies accept both `snake_case` (`max_restarts`) and
+  `lowerCamelCase` (`maxRestarts`) — decoded from `daemon.proto`. Unknown
+  fields are ignored.
+
+## Endpoint summary
+
+| Method   | Path                                | Body                                       | Returns                          |
+| -------- | ----------------------------------- | ------------------------------------------ | -------------------------------- |
+| `GET`    | `/api/v1/health`                    | —                                          | daemon metadata                  |
+| `GET`    | `/api/v1/processes`                 | —                                          | jlist array                      |
+| `POST`   | `/api/v1/processes`                 | spec \| `{specs}` \| `[spec]`              | started apps (jlist)             |
+| `GET`    | `/api/v1/processes/{target}`        | —                                          | one app (jlist)                  |
+| `DELETE` | `/api/v1/processes/{target}`        | —                                          | `{ok, affected_pm_ids}`          |
+| `POST`   | `/api/v1/processes/{target}/restart`| `{env}` (optional)                         | `{ok, affected_pm_ids}`          |
+| `POST`   | `/api/v1/processes/{target}/reload` | —                                          | `{ok, affected_pm_ids}`          |
+| `POST`   | `/api/v1/processes/{target}/stop`   | —                                          | `{ok, affected_pm_ids}`          |
+| `POST`   | `/api/v1/processes/{target}/scale`  | `{delta}`                                  | `{ok, affected_pm_ids}`          |
+| `GET`    | `/api/v1/processes/{target}/logs`   | — (query: `lines`,`follow`,`stderr`,`raw`) | SSE stream                       |
+| `POST`   | `/api/v1/scale`                     | `{name, delta}`                            | `{ok, affected_pm_ids}`          |
+| `POST`   | `/api/v1/daemon/save`               | —                                          | `{ok, dump_path, saved_count}`   |
+| `POST`   | `/api/v1/daemon/resurrect`          | —                                          | `{ok, started_count, errored_count}` |
+
+<Callout type="info" title="Detailed reference">
+  See the [Endpoints](/docs/http-api/endpoints) page for request/response
+  examples and full field descriptions for every endpoint.
+</Callout>
