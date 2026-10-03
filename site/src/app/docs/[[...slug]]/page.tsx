@@ -25,7 +25,7 @@ export default async function Page(props: {
         owner: "thakurdotdev",
         repo: "pm0",
         sha: "main",
-        path: `content/docs/${page.path}`,
+        path: `site/content/docs/${page.path}`,
       }}
     >
       <DocsTitle className="text-3xl font-semibold tracking-tight">

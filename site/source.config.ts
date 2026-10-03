@@ -4,10 +4,10 @@ export const docs = defineDocs({ dir: "content/docs" });
 
 export default defineConfig({
   mdxOptions: {
-    rehypeCodeOptions: {
+
+    rehypePlugins: [
       // Dual theme (dark + light variant tokens are both emitted inline);
       // globals.css forces the dark palette so code stays dark in both themes.
-      keepBackground: false,
-    },
+    ],
   },
 });
