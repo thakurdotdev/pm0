@@ -68,6 +68,13 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable}`}
     >
+      <head>
+        <script
+          defer
+          src="https://analytics.thakur.dev/script.js"
+          data-website-id="4cffba79-4cee-43c9-9137-6131406d5695"
+        />
+      </head>
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">
         <RootProvider
           theme={{
