@@ -729,11 +729,17 @@ func ReadSystemStats() SystemStats {
 	if data, err := os.ReadFile("/proc/meminfo"); err == nil {
 		lines := strings.Split(string(data), "\n")
 		var totalKB, availKB uint64
+		var foundTotal, foundAvail bool
 		for _, line := range lines {
 			if strings.HasPrefix(line, "MemTotal:") {
 				totalKB = parseMemKB(line)
+				foundTotal = true
 			} else if strings.HasPrefix(line, "MemAvailable:") {
 				availKB = parseMemKB(line)
+				foundAvail = true
+			}
+			if foundTotal && foundAvail {
+				break
 			}
 		}
 		if totalKB > 0 {
