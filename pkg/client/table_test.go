@@ -144,7 +144,7 @@ func TestWriteListTableEmpty(t *testing.T) {
 }
 
 func TestReadSystemStats(t *testing.T) {
-	stats := readSystemStats()
+	stats := ReadSystemStats()
 	if stats.CPUCores <= 0 {
 		t.Errorf("expected CPUCores > 0, got %d", stats.CPUCores)
 	}

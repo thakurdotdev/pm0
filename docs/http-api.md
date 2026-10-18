@@ -180,6 +180,48 @@ curl -s http://127.0.0.1:9615/api/v1/processes
 
 An empty app set returns `[]` (never `null`).
 
+#### System resources usage and availability option
+
+To include host system resources usage and availability alongside the process list without breaking the default array format, pass a query parameter such as `?system=true` (or `?system_resources=true`, `?stats=true`, `?format=object`, `?include=system`):
+
+```sh
+curl -s "http://127.0.0.1:9615/api/v1/processes?system=true"
+```
+
+```json
+{
+  "processes": [
+    {
+      "pid": 7731,
+      "name": "web-0",
+      "pm_id": 0,
+      "monit": { "memory": 48896000, "cpu": 0.4 },
+      "pm2_env": { "name": "web-0", "status": "online", "pm_id": 0, "...": "..." }
+    }
+  ],
+  "system": {
+    "cpu_cores": 8,
+    "load_1": 0.15,
+    "load_5": 0.20,
+    "load_15": 0.18,
+    "total_memory": 17179869184,
+    "used_memory": 8589934592,
+    "available_memory": 8589934592,
+    "memory_used_pct": 50.0
+  },
+  "system_resources": {
+    "cpu_cores": 8,
+    "load_1": 0.15,
+    "load_5": 0.20,
+    "load_15": 0.18,
+    "total_memory": 17179869184,
+    "used_memory": 8589934592,
+    "available_memory": 8589934592,
+    "memory_used_pct": 50.0
+  }
+}
+```
+
 ### 5.3 `GET /api/v1/processes/{target}`
 
 Describe one app in full (same object shape as one element of the list). On an

@@ -182,6 +182,34 @@ func TestHTTPProcessesEmptyIsArray(t *testing.T) {
 	}
 }
 
+func TestHTTPProcessesWithSystemResources(t *testing.T) {
+	_, _, ts := startHTTP(t)
+
+	params := []string{
+		"?system=true",
+		"?system_resources=true",
+		"?stats=true",
+		"?format=object",
+		"?include=system",
+	}
+
+	for _, param := range params {
+		code, body := httpGet(t, ts.URL+"/api/v1/processes"+param)
+		if code != http.StatusOK {
+			t.Fatalf("GET /api/v1/processes%s code = %d, want 200", param, code)
+		}
+		if !strings.Contains(body, `"processes":[]`) {
+			t.Fatalf("GET /api/v1/processes%s body = %s, want processes array", param, body)
+		}
+		if !strings.Contains(body, `"system":{`) || !strings.Contains(body, `"system_resources":{`) {
+			t.Fatalf("GET /api/v1/processes%s body = %s, want system/system_resources object", param, body)
+		}
+		if !strings.Contains(body, `"total_memory":`) || !strings.Contains(body, `"available_memory":`) || !strings.Contains(body, `"cpu_cores":`) {
+			t.Fatalf("GET /api/v1/processes%s body = %s, want memory and cpu fields", param, body)
+		}
+	}
+}
+
 func TestHTTPStartListDescribeActions(t *testing.T) {
 	_, c, ts := startHTTP(t)
 	name := harness.UniqueName("http")

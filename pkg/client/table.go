@@ -297,7 +297,7 @@ func printUsageSummary(w io.Writer, ps []*v1.ProcessInfo, tableWidth int, color 
 		}
 	}
 
-	sys := readSystemStats()
+	sys := ReadSystemStats()
 
 	// 1. Process summary
 	var procDisp string
@@ -699,18 +699,19 @@ func isTerminal(w io.Writer) bool {
 }
 
 type SystemStats struct {
-	TotalMem   uint64
-	UsedMem    uint64
-	MemUsedPct float64
-	CPUCores   int
-	Load1      float64
-	Load5      float64
-	Load15     float64
-	HasMem     bool
-	HasLoad    bool
+	TotalMem   uint64  `json:"total_memory"`
+	UsedMem    uint64  `json:"used_memory"`
+	AvailMem   uint64  `json:"available_memory"`
+	MemUsedPct float64 `json:"memory_used_pct"`
+	CPUCores   int     `json:"cpu_cores"`
+	Load1      float64 `json:"load_1"`
+	Load5      float64 `json:"load_5"`
+	Load15     float64 `json:"load_15"`
+	HasMem     bool    `json:"has_mem"`
+	HasLoad    bool    `json:"has_load"`
 }
 
-func readSystemStats() SystemStats {
+func ReadSystemStats() SystemStats {
 	stats := SystemStats{
 		CPUCores: runtime.NumCPU(),
 	}
@@ -737,6 +738,7 @@ func readSystemStats() SystemStats {
 		}
 		if totalKB > 0 {
 			stats.TotalMem = totalKB * 1024
+			stats.AvailMem = availKB * 1024
 			if totalKB >= availKB {
 				stats.UsedMem = (totalKB - availKB) * 1024
 				stats.MemUsedPct = float64(totalKB-availKB) / float64(totalKB) * 100

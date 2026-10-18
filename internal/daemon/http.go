@@ -167,7 +167,10 @@ func (s *Server) httpHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // httpList returns every app as a PM2-compatible jlist array (the same JSON
-// `pm0 jlist` prints, via the shared renderer).
+// `pm0 jlist` prints, via the shared renderer). If requested via query param
+// (e.g. ?system=true, ?system_resources=true, ?stats=true, ?format=object,
+// or ?include=system), it returns an object containing the process list and
+// system resource usage and availability metrics.
 func (s *Server) httpList(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.ListProcesses(r.Context(), &v1.ListProcessesRequest{})
 	if err != nil {
@@ -179,7 +182,37 @@ func (s *Server) httpList(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+
+	if wantsSystemResources(r) {
+		sys := client.ReadSystemStats()
+		sysObj := map[string]any{
+			"cpu_cores":        sys.CPUCores,
+			"load_1":           sys.Load1,
+			"load_5":           sys.Load5,
+			"load_15":          sys.Load15,
+			"total_memory":     sys.TotalMem,
+			"used_memory":      sys.UsedMem,
+			"available_memory": sys.AvailMem,
+			"memory_used_pct":  sys.MemUsedPct,
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"processes":        json.RawMessage(b),
+			"system":           sysObj,
+			"system_resources": sysObj,
+		})
+		return
+	}
+
 	writeRawJSON(w, http.StatusOK, b)
+}
+
+func wantsSystemResources(r *http.Request) bool {
+	q := r.URL.Query()
+	return queryBool(q.Get("system"), false) ||
+		queryBool(q.Get("system_resources"), false) ||
+		queryBool(q.Get("stats"), false) ||
+		strings.EqualFold(q.Get("format"), "object") ||
+		strings.Contains(q.Get("include"), "system")
 }
 
 func (s *Server) httpDescribe(w http.ResponseWriter, r *http.Request) {
