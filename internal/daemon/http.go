@@ -20,6 +20,7 @@
 //
 //	GET    /health                         daemon metadata (Ping)
 //	GET    /processes                      list all apps (PM2 jlist JSON)
+//	GET    /processes?system=true          list apps + host CPU/load/memory stats
 //	POST   /processes                      start (spec | {"specs":[...]} | [spec,...])
 //	GET    /processes/{target}             describe one app (PM2 jlist JSON)
 //	DELETE /processes/{target}             stop + forget
@@ -28,6 +29,8 @@
 //	POST   /processes/{target}/stop        stop (state kept)
 //	POST   /processes/{target}/scale       body {"delta": N}
 //	GET    /processes/{target}/logs        Server-Sent Events log stream
+//	POST   /processes/{target}/logs/clear  truncate the app's log files
+//	DELETE /processes/{target}/logs        alias for logs/clear
 //	POST   /scale                          body {"name":"x","delta":N}
 //	POST   /daemon/save                    persist the app set (dump.json)
 //	POST   /daemon/resurrect               adopt/start from dump.json
@@ -138,6 +141,8 @@ func (s *Server) httpHandler() http.Handler {
 	mux.HandleFunc("POST /api/v1/processes/{target}/stop", s.httpStop)
 	mux.HandleFunc("POST /api/v1/processes/{target}/scale", s.httpScaleByPath)
 	mux.HandleFunc("GET /api/v1/processes/{target}/logs", s.httpLogs)
+	mux.HandleFunc("POST /api/v1/processes/{target}/logs/clear", s.httpClearLogs)
+	mux.HandleFunc("DELETE /api/v1/processes/{target}/logs", s.httpClearLogs)
 
 	mux.HandleFunc("POST /api/v1/scale", s.httpScale)
 
@@ -167,7 +172,9 @@ func (s *Server) httpHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // httpList returns every app as a PM2-compatible jlist array (the same JSON
-// `pm0 jlist` prints, via the shared renderer).
+// `pm0 jlist` prints, via the shared renderer). The default shape stays an
+// array; ?system=true opts into an envelope that adds host telemetry without
+// changing what existing clients receive.
 func (s *Server) httpList(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.ListProcesses(r.Context(), &v1.ListProcessesRequest{})
 	if err != nil {
@@ -179,7 +186,47 @@ func (s *Server) httpList(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	if queryBool(r.URL.Query().Get("system"), false) {
+		writeJSON(w, http.StatusOK, struct {
+			Processes json.RawMessage `json:"processes"`
+			System    httpSystemStats `json:"system"`
+		}{
+			Processes: json.RawMessage(b),
+			System:    readHTTPSystemStats(),
+		})
+		return
+	}
 	writeRawJSON(w, http.StatusOK, b)
+}
+
+// httpSystemStats is the host telemetry exposed by ?system=true. Memory
+// values are bytes; load values are the 1/5/15-minute averages. The Has*
+// flags mirror the /proc availability signals the CLI uses.
+type httpSystemStats struct {
+	CPUCores      int     `json:"cpu_cores"`
+	Load1         float64 `json:"load_1"`
+	Load5         float64 `json:"load_5"`
+	Load15        float64 `json:"load_15"`
+	HasLoad       bool    `json:"has_load"`
+	MemoryTotal   uint64  `json:"memory_total_bytes"`
+	MemoryUsed    uint64  `json:"memory_used_bytes"`
+	MemoryUsedPct float64 `json:"memory_used_pct"`
+	HasMemory     bool    `json:"has_memory"`
+}
+
+func readHTTPSystemStats() httpSystemStats {
+	st := client.ReadSystemStats()
+	return httpSystemStats{
+		CPUCores:      st.CPUCores,
+		Load1:         st.Load1,
+		Load5:         st.Load5,
+		Load15:        st.Load15,
+		HasLoad:       st.HasLoad,
+		MemoryTotal:   st.TotalMem,
+		MemoryUsed:    st.UsedMem,
+		MemoryUsedPct: st.MemUsedPct,
+		HasMemory:     st.HasMem,
+	}
 }
 
 func (s *Server) httpDescribe(w http.ResponseWriter, r *http.Request) {
@@ -364,6 +411,40 @@ func (s *Server) httpLogs(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "event: error\ndata: %s\n\n", payload)
 		flusher.Flush()
 	}
+}
+
+// httpClearLogs truncates the selected apps' stdout/stderr sinks (and
+// rotated siblings) and empties their in-memory backlog. The default
+// `pm0 flush` target set applies: ids, names (whole family), or all.
+func (s *Server) httpClearLogs(w http.ResponseWriter, r *http.Request) {
+	views := s.resolveSelector(selectorFromTarget(r.PathValue("target")))
+	if len(views) == 0 {
+		writeErr(w, status.Error(codes.NotFound, "no matching app"))
+		return
+	}
+
+	cleared, err := truncateLogFiles(appLogFiles(views))
+	for _, v := range views {
+		s.clearRoute(v.ID)
+	}
+
+	ids := make([]int32, 0, len(views))
+	for _, v := range views {
+		ids = append(ids, int32(v.ID))
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"error":           "clear logs: " + err.Error(),
+			"affected_pm_ids": ids,
+			"cleared_files":   cleared,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":              true,
+		"affected_pm_ids": ids,
+		"cleared_files":   cleared,
+	})
 }
 
 func (s *Server) httpSave(w http.ResponseWriter, r *http.Request) {

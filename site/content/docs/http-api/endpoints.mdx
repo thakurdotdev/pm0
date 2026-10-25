@@ -1,6 +1,6 @@
 ---
 title: Endpoints
-description: Full reference for every pm0 HTTP API endpoint — health, list, describe, start, stop, restart, reload, delete, scale, logs, save, and resurrect.
+description: Full reference for every pm0 HTTP API endpoint — health, list (with optional host stats), describe, start, stop, restart, reload, delete, scale, logs, clear logs, save, and resurrect.
 ---
 
 All endpoints are under the `/api/v1` base path. Requests and responses are
@@ -68,6 +68,44 @@ curl -s http://127.0.0.1:9615/api/v1/processes
 ```
 
 An empty app set returns `[]` (never `null`).
+
+### Host system stats (opt-in)
+
+Add `?system=true` to keep the default array response backward-compatible while
+asking for host telemetry alongside the list:
+
+```bash
+curl -s 'http://127.0.0.1:9615/api/v1/processes?system=true'
+```
+
+```json
+{
+  "processes": [
+    {
+      "pid": 7731,
+      "name": "web-0",
+      "pm_id": 0,
+      "monit": { "memory": 48896000, "cpu": 0.4 },
+      "pm2_env": { "name": "web-0", "status": "online", "pm_id": 0 }
+    }
+  ],
+  "system": {
+    "cpu_cores": 8,
+    "load_1": 0.42,
+    "load_5": 0.31,
+    "load_15": 0.28,
+    "has_load": true,
+    "memory_total_bytes": 16777216000,
+    "memory_used_bytes": 7340032000,
+    "memory_used_pct": 43.75,
+    "has_memory": true
+  }
+}
+```
+
+Memory values are bytes; `has_load` / `has_memory` are false only when the
+corresponding `/proc` file cannot be read. An empty app set is still
+`"processes": []`. The default response (no query) is unchanged.
 
 ---
 
@@ -311,6 +349,29 @@ es.onmessage = (e) => {
   (`proxy_buffering off;` in nginx). The daemon already sends
   `X-Accel-Buffering: no`.
 </Callout>
+
+---
+
+## Logs — Clear
+
+### `POST /api/v1/processes/{target}/logs/clear`
+
+Empty the selected app's stdout/stderr log files (including rotated copies)
+and drop its in-memory backlog, so the next logs stream starts clean.
+`{target}` is a normal selector, so a name clears the whole family and `all`
+clears every app. Files are truncated in place; running children keep their
+append-mode descriptors and continue logging.
+
+```bash
+curl -s -X POST http://127.0.0.1:9615/api/v1/processes/web/logs/clear
+```
+
+```json
+{ "ok": true, "affected_pm_ids": [0, 1], "cleared_files": 4 }
+```
+
+`DELETE /api/v1/processes/{target}/logs` is an equivalent alias. Missing apps
+return `404`.
 
 ---
 

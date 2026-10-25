@@ -698,6 +698,8 @@ func isTerminal(w io.Writer) bool {
 	return err == nil && (st.Mode()&os.ModeCharDevice) != 0
 }
 
+// SystemStats is a point-in-time snapshot of host CPU, load and memory.
+// Memory values are bytes; load values are the 1/5/15-minute averages.
 type SystemStats struct {
 	TotalMem   uint64
 	UsedMem    uint64
@@ -709,6 +711,11 @@ type SystemStats struct {
 	HasMem     bool
 	HasLoad    bool
 }
+
+// ReadSystemStats reads host telemetry from /proc (loadavg, meminfo) and
+// runtime.NumCPU. Missing /proc files yield zero values with the matching
+// Has flag cleared.
+func ReadSystemStats() SystemStats { return readSystemStats() }
 
 func readSystemStats() SystemStats {
 	stats := SystemStats{

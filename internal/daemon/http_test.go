@@ -7,6 +7,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -179,6 +180,132 @@ func TestHTTPProcessesEmptyIsArray(t *testing.T) {
 	code, body := httpGet(t, ts.URL+"/api/v1/processes")
 	if code != http.StatusOK || strings.TrimSpace(body) != "[]" {
 		t.Fatalf("empty list = %d %q, want 200 []", code, body)
+	}
+}
+
+func TestHTTPProcessesSystemStatsOptIn(t *testing.T) {
+	_, _, ts := startHTTP(t)
+
+	// The default response remains the bare jlist array (no wrapper).
+	code, body := httpGet(t, ts.URL+"/api/v1/processes")
+	if code != http.StatusOK || !strings.HasPrefix(strings.TrimSpace(body), "[") {
+		t.Fatalf("default list = %d %q, want a JSON array", code, body)
+	}
+
+	code, body = httpGet(t, ts.URL+"/api/v1/processes?system=true")
+	if code != http.StatusOK {
+		t.Fatalf("list with system stats = %d, body = %s", code, body)
+	}
+	var got struct {
+		Processes []map[string]any `json:"processes"`
+		System    struct {
+			CPUCores    int     `json:"cpu_cores"`
+			Load1       float64 `json:"load_1"`
+			Load5       float64 `json:"load_5"`
+			Load15      float64 `json:"load_15"`
+			HasLoad     bool    `json:"has_load"`
+			MemoryTotal uint64  `json:"memory_total_bytes"`
+			MemoryUsed  uint64  `json:"memory_used_bytes"`
+			MemoryPct   float64 `json:"memory_used_pct"`
+			HasMemory   bool    `json:"has_memory"`
+		} `json:"system"`
+	}
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatalf("decode list+system: %v\n%s", err, body)
+	}
+	if got.Processes == nil || len(got.Processes) != 0 {
+		t.Fatalf("processes = %v, want []", got.Processes)
+	}
+	if !strings.Contains(body, `"processes":[]`) {
+		t.Fatalf("empty processes should be [] not null: %s", body)
+	}
+	if got.System.CPUCores <= 0 {
+		t.Errorf("cpu_cores = %d, want > 0", got.System.CPUCores)
+	}
+	if got.System.HasMemory && got.System.MemoryTotal == 0 {
+		t.Error("memory_total_bytes = 0 while has_memory is true")
+	}
+	if got.System.HasLoad && (got.System.Load1 < 0 || got.System.Load5 < 0 || got.System.Load15 < 0) {
+		t.Errorf("load averages = %v/%v/%v, want >= 0", got.System.Load1, got.System.Load5, got.System.Load15)
+	}
+}
+
+func TestHTTPClearProcessLogs(t *testing.T) {
+	srv, c, ts := startHTTP(t)
+	name := harness.UniqueName("clearlogs")
+	resp, err := c.Start([]*v1.ProcessSpec{{
+		Name:        name,
+		Script:      fakechild,
+		Args:        []string{"--flood", "5", "--flood-err", "5", "--exit-after", "60000"},
+		Autorestart: true,
+		Cwd:         t.TempDir(),
+	}})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	id := resp.GetProcesses()[0].GetPmId()
+
+	desc, err := c.Describe(&v1.Selector{PmIds: []int32{id}})
+	if err != nil {
+		t.Fatalf("describe: %v", err)
+	}
+	env := desc.GetProcess().GetPm2Env()
+	outPath := env.GetPmOutLogPath()
+	errPath := env.GetPmErrLogPath()
+	if outPath == "" || errPath == "" {
+		t.Fatalf("missing log paths: out=%q err=%q", outPath, errPath)
+	}
+	waitFor(t, 6*time.Second, "log files populated", func() bool {
+		out, e1 := os.Stat(outPath)
+		err, e2 := os.Stat(errPath)
+		return e1 == nil && e2 == nil && out.Size() > 0 && err.Size() > 0
+	})
+
+	// Rotated siblings are part of the process's log set too.
+	rotated := outPath + ".20260101T000000.000000000"
+	if err := os.WriteFile(rotated, []byte("old rotated line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, body := httpDo(t, http.MethodPost, ts.URL+"/api/v1/processes/"+name+"/logs/clear", "")
+	if code != http.StatusOK {
+		t.Fatalf("clear logs = %d, body = %s", code, body)
+	}
+	var response struct {
+		OK            bool    `json:"ok"`
+		AffectedPMIDs []int32 `json:"affected_pm_ids"`
+		ClearedFiles  int     `json:"cleared_files"`
+	}
+	if err := json.Unmarshal([]byte(body), &response); err != nil {
+		t.Fatalf("decode clear response: %v\n%s", err, body)
+	}
+	if !response.OK || len(response.AffectedPMIDs) != 1 || response.AffectedPMIDs[0] != id {
+		t.Fatalf("clear response = %+v, want the app id %d", response, id)
+	}
+	if response.ClearedFiles < 3 {
+		t.Fatalf("cleared_files = %d, want at least out+err+rotated", response.ClearedFiles)
+	}
+	for _, path := range []string{outPath, errPath, rotated} {
+		st, err := os.Stat(path)
+		if err != nil {
+			t.Errorf("stat %s: %v", path, err)
+			continue
+		}
+		if st.Size() != 0 {
+			t.Errorf("%s size = %d, want 0", path, st.Size())
+		}
+	}
+
+	if bl := routeOf(srv, id).BacklogAll(true); len(bl) != 0 {
+		t.Errorf("in-memory backlog has %d entries after clear, want 0", len(bl))
+	}
+
+	// The DELETE form is an alias; missing apps are a 404.
+	if code, body = httpDo(t, http.MethodDelete, ts.URL+"/api/v1/processes/"+name+"/logs", ""); code != http.StatusOK {
+		t.Fatalf("DELETE logs alias = %d, body = %s", code, body)
+	}
+	if code, _ = httpDo(t, http.MethodPost, ts.URL+"/api/v1/processes/does-not-exist/logs/clear", ""); code != http.StatusNotFound {
+		t.Fatalf("clear missing app = %d, want 404", code)
 	}
 }
 

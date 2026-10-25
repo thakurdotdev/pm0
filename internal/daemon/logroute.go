@@ -130,3 +130,16 @@ func (s *Server) deleteAppView(v supervisor.AppView) error {
 	s.closeRoute(v.ID)
 	return err
 }
+
+// clearRoute empties an app's in-memory backlog without stopping its
+// pumps. It is used by log flushing: truncating the files alone leaves
+// the old lines visible to StreamLogs/SSE until the ring naturally
+// rolls over.
+func (s *Server) clearRoute(pmid int) {
+	s.mu.Lock()
+	r := s.routes[pmid]
+	s.mu.Unlock()
+	if r != nil {
+		r.Clear()
+	}
+}

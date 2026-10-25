@@ -114,8 +114,9 @@ pm0 startup                          # Install systemd service for auto-boot
 ## HTTP API (opt-in)
 
 pm0 can expose a local JSON/REST control plane for dashboards and co-located
-backend services — list processes with full PM2-compatible data, and act on
-them (start, stop, restart, reload, delete, scale, stream logs over SSE).
+backend services — list processes with full PM2-compatible data (optionally
+with host CPU/load/memory stats), act on them (start, stop, restart, reload,
+delete, scale), stream logs over SSE, and clear an app's logs.
 
 Off by default. Enable it with `PM0_HTTP_ADDR` (`host:port` or `unix:/path`),
 with `pm0 daemon --http-addr`, or by answering "yes" to the installer prompt
@@ -125,7 +126,9 @@ with `pm0 daemon --http-addr`, or by answering "yes" to the installer prompt
 PM0_HTTP_ADDR=127.0.0.1:9615 pm0 daemon
 
 curl -s http://127.0.0.1:9615/api/v1/processes
+curl -s 'http://127.0.0.1:9615/api/v1/processes?system=true'
 curl -s -X POST http://127.0.0.1:9615/api/v1/processes/web/restart
+curl -s -X POST http://127.0.0.1:9615/api/v1/processes/web/logs/clear
 ```
 
 It has no authentication of its own and is meant to be bound to loopback (or a

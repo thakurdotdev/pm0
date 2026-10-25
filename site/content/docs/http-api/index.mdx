@@ -5,8 +5,9 @@ description: pm0's opt-in REST + SSE HTTP API — a JSON transport adapter over 
 
 pm0 ships an **opt-in** HTTP/REST control plane for the daemon. It exposes
 the same capabilities as the CLI and the gRPC SDK — list processes, act on them
-(start, stop, restart, reload, delete, scale), and stream logs — as plain JSON
-over HTTP so dashboards, monitoring tools, and CI/CD hooks can consume it.
+(start, stop, restart, reload, delete, scale), stream or clear logs, and request
+host CPU/load/memory telemetry with the process list — as plain JSON over HTTP
+so dashboards, monitoring tools, and CI/CD hooks can consume it.
 
 <Callout type="warn" title="Opt-in and off by default">
   The HTTP API is **disabled unless you enable it explicitly**. pm0 opens no
@@ -61,7 +62,7 @@ curl -s http://127.0.0.1:9615/api/v1/health   # HTTP health
 | Method   | Path                                | Body                                       | Returns                          |
 | -------- | ----------------------------------- | ------------------------------------------ | -------------------------------- |
 | `GET`    | `/api/v1/health`                    | —                                          | daemon metadata                  |
-| `GET`    | `/api/v1/processes`                 | —                                          | jlist array                      |
+| `GET`    | `/api/v1/processes`                 | — (query: `system=true` for host stats)    | jlist array / `{processes, system}` |
 | `POST`   | `/api/v1/processes`                 | spec \| `{specs}` \| `[spec]`              | started apps (jlist)             |
 | `GET`    | `/api/v1/processes/{target}`        | —                                          | one app (jlist)                  |
 | `DELETE` | `/api/v1/processes/{target}`        | —                                          | `{ok, affected_pm_ids}`          |
@@ -70,6 +71,8 @@ curl -s http://127.0.0.1:9615/api/v1/health   # HTTP health
 | `POST`   | `/api/v1/processes/{target}/stop`   | —                                          | `{ok, affected_pm_ids}`          |
 | `POST`   | `/api/v1/processes/{target}/scale`  | `{delta}`                                  | `{ok, affected_pm_ids}`          |
 | `GET`    | `/api/v1/processes/{target}/logs`   | — (query: `lines`,`follow`,`stderr`,`raw`) | SSE stream                       |
+| `POST`   | `/api/v1/processes/{target}/logs/clear` | —                                      | `{ok, affected_pm_ids, cleared_files}` |
+| `DELETE` | `/api/v1/processes/{target}/logs`   | —                                          | alias of logs/clear              |
 | `POST`   | `/api/v1/scale`                     | `{name, delta}`                            | `{ok, affected_pm_ids}`          |
 | `POST`   | `/api/v1/daemon/save`               | —                                          | `{ok, dump_path, saved_count}`   |
 | `POST`   | `/api/v1/daemon/resurrect`          | —                                          | `{ok, started_count, errored_count}` |

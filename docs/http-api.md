@@ -3,7 +3,9 @@
 An **opt-in**, locally-bound HTTP/REST control plane for the pm0 daemon. It
 exposes the same capabilities as the CLI and the gRPC SDK — list processes and
 their full data, and act on them (start, stop, restart, reload, delete, scale,
-stream logs) — as plain JSON over HTTP so a dashboard backend can consume it.
+stream or clear logs) — as plain JSON over HTTP so a dashboard backend can
+consume it. The process list can also carry host CPU/load/memory telemetry on
+request without changing its default array shape.
 
 > This is a transport adapter over the existing gRPC `pm0.v1.Daemon` service.
 > Every handler calls the same server methods the CLI uses, so process-control
@@ -179,6 +181,46 @@ curl -s http://127.0.0.1:9615/api/v1/processes
 ```
 
 An empty app set returns `[]` (never `null`).
+
+#### Host system stats (opt-in)
+
+Add `?system=true` to keep the response backward-compatible while asking for
+host telemetry alongside the list. The default (no query) remains the bare
+jlist array above; with the flag the response is an envelope:
+
+```sh
+curl -s 'http://127.0.0.1:9615/api/v1/processes?system=true'
+```
+
+```json
+{
+  "processes": [
+    {
+      "pid": 7731,
+      "name": "web-0",
+      "pm_id": 0,
+      "monit": { "memory": 48896000, "cpu": 0.4 },
+      "pm2_env": { "name": "web-0", "status": "online", "pm_id": 0 }
+    }
+  ],
+  "system": {
+    "cpu_cores": 8,
+    "load_1": 0.42,
+    "load_5": 0.31,
+    "load_15": 0.28,
+    "has_load": true,
+    "memory_total_bytes": 16777216000,
+    "memory_used_bytes": 7340032000,
+    "memory_used_pct": 43.75,
+    "has_memory": true
+  }
+}
+```
+
+`system` values are read from the daemon host's `/proc` (`loadavg`, `meminfo`)
+and `runtime.NumCPU()`. Memory values are bytes; `has_load` / `has_memory`
+are false only when the corresponding `/proc` file cannot be read. An empty
+app set is still `"processes": []`.
 
 ### 5.3 `GET /api/v1/processes/{target}`
 
@@ -371,7 +413,26 @@ es.onmessage = (e) => {
 > (`proxy_buffering off;` in nginx). The daemon already sends
 > `X-Accel-Buffering: no`.
 
-### 5.11 `POST /api/v1/daemon/save` and `POST /api/v1/daemon/resurrect`
+### 5.11 `POST /api/v1/processes/{target}/logs/clear` — clear logs
+
+Empty the selected app's stdout/stderr log files (including rotated copies)
+and drop its in-memory backlog, so a subsequent `GET .../logs` starts clean.
+`{target}` uses the usual selector rules, so a name clears the whole family and
+`all` clears every app. The files are truncated in place; running children keep
+their append-mode descriptors and continue logging.
+
+```sh
+curl -s -X POST http://127.0.0.1:9615/api/v1/processes/web/logs/clear
+```
+
+```json
+{ "ok": true, "affected_pm_ids": [0, 1], "cleared_files": 4 }
+```
+
+`DELETE /api/v1/processes/{target}/logs` is an equivalent alias. Missing apps
+return `404`.
+
+### 5.12 `POST /api/v1/daemon/save` and `POST /api/v1/daemon/resurrect`
 
 Persist the current app set to `dump.json`, and adopt/start from it.
 
@@ -605,7 +666,7 @@ Bun equivalent: replace the listener with `Bun.serve({ port: 8080, fetch })`.
 | Method | Path | Body | Returns |
 |---|---|---|---|
 | GET | `/api/v1/health` | — | daemon metadata |
-| GET | `/api/v1/processes` | — | jlist array |
+| GET | `/api/v1/processes` | — (query: `system=true` for host stats) | jlist array, or `{processes, system}` envelope |
 | POST | `/api/v1/processes` | spec \| `{specs}` \| `[spec]` | started apps (jlist) |
 | GET | `/api/v1/processes/{target}` | — | one app (jlist) |
 | DELETE | `/api/v1/processes/{target}` | — | `{ok, affected_pm_ids}` |
@@ -614,6 +675,8 @@ Bun equivalent: replace the listener with `Bun.serve({ port: 8080, fetch })`.
 | POST | `/api/v1/processes/{target}/stop` | — | `{ok, affected_pm_ids}` |
 | POST | `/api/v1/processes/{target}/scale` | `{delta}` | `{ok, affected_pm_ids}` |
 | GET | `/api/v1/processes/{target}/logs` | — (query: `lines`,`follow`,`stderr`,`raw`) | SSE stream |
+| POST | `/api/v1/processes/{target}/logs/clear` | — | `{ok, affected_pm_ids, cleared_files}` |
+| DELETE | `/api/v1/processes/{target}/logs` | — | alias of logs/clear |
 | POST | `/api/v1/scale` | `{name, delta}` | `{ok, affected_pm_ids}` |
 | POST | `/api/v1/daemon/save` | — | `{ok, dump_path, saved_count}` |
 | POST | `/api/v1/daemon/resurrect` | — | `{ok, started_count, errored_count}` |
