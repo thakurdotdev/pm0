@@ -384,6 +384,17 @@ func TestSyncRetiresStaleRunnerOnIDReuse(t *testing.T) {
 	r.Tick = 10 * time.Millisecond
 	r.MemInterval = 30 * time.Millisecond
 
+	// Real time plus a jumpable offset: the memory runner keeps seeing its
+	// interval elapse (so a stale runner WOULD keep firing), while the cron
+	// slot can be crossed on demand instead of waiting up to a real minute.
+	var clockMu sync.Mutex
+	var offset time.Duration
+	r.Now = func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		return time.Now().Add(offset)
+	}
+
 	// First incarnation: pm_id 0, memory trigger.
 	r.Sync([]View{{ID: 0, Serial: 1, Cfg: testView(0, func(c *config.App) { c.MaxMemoryRestart = 1000 }).Cfg}})
 	waitFor(t, 2*time.Second, "first incarnation memory restart", func() bool {
@@ -405,20 +416,13 @@ func TestSyncRetiresStaleRunnerOnIDReuse(t *testing.T) {
 	if rn == nil || rn.serial != 2 {
 		t.Fatalf("successor runner missing or stale (serial mismatch)")
 	}
-	// Drive the clock: the reconciler's Now is time.Now by default — swap in
-	// a mutable one is not possible post-hoc here; instead wait for the real
-	// next minute (bounded by the cron slot).
-	deadline := time.Now().Add(70 * time.Second)
-	fired := false
-	for time.Now().Before(deadline) {
-		if f.restartCount() >= 2 {
-			fired = true
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	if !fired {
-		t.Fatal("successor cron runner never fired after id reuse")
-	}
+	// Jump the clock just past the next minute boundary.
+	clockMu.Lock()
+	cur := time.Now().Add(offset)
+	offset += cur.Truncate(time.Minute).Add(time.Minute + time.Second).Sub(cur)
+	clockMu.Unlock()
+	waitFor(t, 2*time.Second, "successor cron runner fires after id reuse", func() bool {
+		return f.restartCount() >= 2
+	})
 	r.Stop()
 }
