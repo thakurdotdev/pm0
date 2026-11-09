@@ -102,3 +102,26 @@ func TestStopWithinReturnsOnExit(t *testing.T) {
 		})
 	}
 }
+
+// A stop issued immediately after Launch, before the cgroup attach wrapper
+// has joined its cgroup, must still deliver the graceful signal instead of
+// waiting out the kill timeout (the leader is signaled directly).
+func TestStopRightAfterLaunchIsGraceful(t *testing.T) {
+	for _, mode := range killPathsForTest(t) {
+		t.Run(string(mode), func(t *testing.T) {
+			if mode != ModePgid {
+				requireCgroupMode(t, mode)
+			}
+			l := newTestLauncher(t, mode)
+			h := launch(t, l, uniqueAppName("stop-immediate"))
+			start := time.Now()
+			if err := h.StopWithin(time.Now().Add(30 * time.Second)); err != nil {
+				t.Fatalf("StopWithin: %v", err)
+			}
+			if elapsed := time.Since(start); elapsed > time.Second {
+				t.Fatalf("immediate stop took %v; graceful signal was lost", elapsed)
+			}
+			assertTreeEmpty(t, h)
+		})
+	}
+}

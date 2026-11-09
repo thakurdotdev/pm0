@@ -100,7 +100,8 @@ func (h *Handle) KillSignalName() string {
 // Signal delivers sig to the whole tree, best effort:
 //
 //   - cgroup modes: every pid currently in cgroup.procs (pids read live
-//     from the kernel — no reuse risk, I6 trivially holds).
+//     from the kernel — no reuse risk, I6 trivially holds), plus the
+//     starttime-verified leader if it has not attached to the cgroup yet.
 //   - pgid mode: kill(-pgid) after verifying the group leader's starttime
 //     (ErrStalePid otherwise — I6). A dead leader means no group signal,
 //     ever: the pgid number may already be reused.
@@ -115,9 +116,25 @@ func (h *Handle) Signal(sig syscall.Signal) error {
 			return err
 		}
 		var firstErr error
+		leaderIn := false
 		for _, pid := range procs {
+			if pid == h.pid {
+				leaderIn = true
+			}
 			if err := unix.Kill(pid, sig); err != nil && firstErr == nil {
 				firstErr = err // ESRCH is normal for exiting members
+			}
+		}
+		// Right after launch the attach wrapper may not have joined its
+		// cgroup yet, so cgroup.procs is still empty and the signal would
+		// reach nobody (stop then sat out the whole kill_timeout and
+		// SIGKILLed). Signal the leader directly, starttime-verified (I6)
+		// like pgid mode. It has not forked yet, so it is the whole tree.
+		if !leaderIn && h.pid > 0 {
+			if st, err := StartTime(h.pid); err == nil && st == h.starttime {
+				if err := unix.Kill(h.pid, sig); err != nil && firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
 		return firstErr
