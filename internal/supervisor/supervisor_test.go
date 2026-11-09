@@ -55,10 +55,9 @@ func startSleep(t *testing.T, s *Supervisor, name string) int {
 	return id
 }
 
-// compat §3.2 (M2 correction from observed pm2): ids come from a
-// monotonic counter that never rewinds while the registry is non-empty;
-// deleting ALL apps resets it to 0.
-func TestPMIDMonotonicAllocation(t *testing.T) {
+// compat §3.2: new ids are the highest live id + 1. A deleted middle id
+// is not refilled; deleting ALL apps starts again at 0.
+func TestPMIDMaxPlusOneAllocation(t *testing.T) {
 	s := newSupervisor(t)
 
 	id0 := startSleep(t, s, harness.UniqueName("sup-a"))
@@ -68,14 +67,14 @@ func TestPMIDMonotonicAllocation(t *testing.T) {
 		t.Fatalf("sequential ids expected 0,1,2; got %d,%d,%d", id0, id1, id2)
 	}
 
-	// Delete the middle app; the next start does NOT reuse id 1 —
-	// observed pm2 hands out 3 (verified against pm2 5.4.2 and 7.0.4).
+	// Delete the middle app; the next start does NOT reuse id 1 — the
+	// highest live id is still 2, so it gets 3.
 	if err := s.Delete(strconv.Itoa(id1)); err != nil {
 		t.Fatalf("Delete(1): %v", err)
 	}
 	id3 := startSleep(t, s, harness.UniqueName("sup-d"))
 	if id3 != 3 {
-		t.Fatalf("monotonic allocation: got %d, want 3", id3)
+		t.Fatalf("max+1 allocation: got %d, want 3", id3)
 	}
 
 	// Deleting the rest empties the registry and rewinds the counter.
@@ -287,4 +286,30 @@ func (s *Supervisor) mustSnapshot(t *testing.T, _ *Supervisor, identifier string
 		t.Fatalf("describe %q failed", identifier)
 	}
 	return v.Runtime
+}
+
+// Deleting the newest apps frees their ids: with 0..9 live, adding five
+// gives 10..14; deleting those five makes the next start 10 again.
+func TestPMIDReusesIdsAboveHighestLive(t *testing.T) {
+	s := newSupervisor(t)
+	for i := 0; i < 10; i++ {
+		if id := startSleep(t, s, harness.UniqueName("base")); id != i {
+			t.Fatalf("base app %d got id %d", i, id)
+		}
+	}
+	var extra []int
+	for i := 0; i < 5; i++ {
+		extra = append(extra, startSleep(t, s, harness.UniqueName("extra")))
+	}
+	if extra[0] != 10 || extra[4] != 14 {
+		t.Fatalf("extra ids = %v, want 10..14", extra)
+	}
+	for _, id := range extra {
+		if err := s.Delete(strconv.Itoa(id)); err != nil {
+			t.Fatalf("Delete(%d): %v", id, err)
+		}
+	}
+	if id := startSleep(t, s, harness.UniqueName("next")); id != 10 {
+		t.Fatalf("after deleting the newest apps, got id %d, want 10", id)
+	}
 }

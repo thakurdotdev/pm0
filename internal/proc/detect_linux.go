@@ -153,6 +153,15 @@ func resolveCgroupMount(path, mountinfo string) (string, error) {
 			continue
 		}
 		root, mount := unescape.Replace(fields[3]), unescape.Replace(fields[4])
+		// A root with ".." components (e.g. "/../..") is a mount of a
+		// hierarchy ABOVE our cgroup namespace root — typically the host's
+		// cgroupfs bind-mounted into a container with a private cgroupns.
+		// Our namespace-relative path cannot be located under it (the
+		// intermediate names are unknown), and guessing maps us onto the
+		// host root, where the kernel refuses to migrate our children.
+		if hasDotDot(root) {
+			continue
+		}
 		rel, err := filepath.Rel(root, path)
 		if err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
 			return filepath.Join(mount, rel), nil
@@ -164,6 +173,16 @@ func resolveCgroupMount(path, mountinfo string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no cgroup2 mount contains %q", path)
+}
+
+// hasDotDot reports whether a slash-separated path has a ".." component.
+func hasDotDot(p string) bool {
+	for _, part := range strings.Split(p, "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 // ownCgroup parses /proc/self/cgroup for the unified `0::<path>` entry.

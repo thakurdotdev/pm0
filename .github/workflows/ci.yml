@@ -76,7 +76,11 @@ jobs:
     continue-on-error: true
     container:
       image: ubuntu:24.04
-      options: --privileged
+      # --cgroupns=host: the host's cgroupfs is bind-mounted below, so the
+      # container must see host cgroup paths in /proc/self/cgroup too.
+      # With a private cgroupns the paths don't match the mount and the
+      # kernel blocks moving children into app cgroups.
+      options: --privileged --cgroupns=host
       volumes:
         - /sys/fs/cgroup:/sys/fs/cgroup:rw
     steps:

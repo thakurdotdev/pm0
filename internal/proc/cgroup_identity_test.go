@@ -21,6 +21,9 @@ func TestResolveCgroupMount(t *testing.T) {
 		{"escaped-mount", "/apps", "/", `/run/cgroup\040mount`, "/run/cgroup mount/apps"},
 		{"outside-subtree", "/other/apps", "/delegated", "/run/cgroups", ""},
 		{"traversal", "/../../outside", "/", "/sys/fs/cgroup", ""},
+		// Host cgroupfs bind-mounted into a private-cgroupns container
+		// (CI's privileged job): must not resolve to the host root.
+		{"mount-above-namespace", "/", "/../..", "/sys/fs/cgroup", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			info := fmt.Sprintf("20 19 0:28 %s %s rw - cgroup2 cgroup rw\n", tc.root, tc.mount)

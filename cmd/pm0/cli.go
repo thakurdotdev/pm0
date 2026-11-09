@@ -9,12 +9,15 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	v1 "github.com/pm0/pm0/api/v1"
+	"github.com/pm0/pm0/internal/proc"
 	"github.com/pm0/pm0/internal/store"
 	"github.com/pm0/pm0/pkg/client"
 )
@@ -29,7 +32,13 @@ func dialDaemon() (*client.Client, error) {
 		}
 		_ = c.Close()
 	}
-	if serr := spawnDaemon(); serr != nil {
+	scoped := wantUserScope()
+	exited, serr := spawnDaemon(scoped)
+	if serr != nil && scoped {
+		scoped = false
+		exited, serr = spawnDaemon(false)
+	}
+	if serr != nil {
 		return nil, fmt.Errorf("daemon is not running and could not be started: %v", serr)
 	}
 	// Wait for the socket to come up.
@@ -42,38 +51,97 @@ func dialDaemon() (*client.Client, error) {
 			}
 			_ = c.Close()
 		}
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-exited:
+			// The launcher died before the socket appeared. Under
+			// systemd-run that usually means the user manager refused
+			// the scope: retry once as a plain detached child.
+			exited = nil // a closed channel would spin this loop
+			if scoped {
+				scoped = false
+				if exited, serr = spawnDaemon(false); serr != nil {
+					return nil, fmt.Errorf("daemon could not be started: %v", serr)
+				}
+			}
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 	return nil, fmt.Errorf("daemon did not come up on %s within 8s", store.SocketPath())
 }
 
+// wantUserScope decides whether to start the daemon in its own systemd
+// user scope. That matters when the caller sits in a cgroup it cannot
+// write to — typically an SSH login's session-N.scope, which systemd owns
+// as root — so a plain child would inherit it and drop to pgid kill mode.
+// A transient scope with Delegate=yes under the user manager is writable.
+//
+// Only done when lingering is enabled: without it the user manager (and
+// everything in it) stops at the user's last logout, which would take the
+// daemon down with the SSH session. PM0_KILL_MODE (tests, ops override)
+// and PM0_NO_USER_SCOPE=1 keep the plain spawn.
+func wantUserScope() bool {
+	if os.Getenv("PM0_KILL_MODE") != "" || os.Getenv("PM0_NO_USER_SCOPE") == "1" {
+		return false
+	}
+	d := proc.Detect()
+	if !d.CgroupV2 || d.CgroupUsable {
+		return false
+	}
+	if _, err := exec.LookPath("systemd-run"); err != nil {
+		return false
+	}
+	rt := os.Getenv("XDG_RUNTIME_DIR")
+	if rt == "" {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(rt, "systemd", "private")); err != nil {
+		return false // no user manager reachable
+	}
+	u, err := user.Current()
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(filepath.Join("/var/lib/systemd/linger", u.Username))
+	return err == nil
+}
+
 // spawnDaemon launches `pm0 daemon` detached: own session, stdio into
 // the daemon log, so it survives the CLI process and never inherits a tty.
-func spawnDaemon() error {
+// With scoped it runs under `systemd-run --user --scope` (see
+// wantUserScope). The returned channel closes when the launched process
+// exits, letting the caller notice a launcher that died early.
+func spawnDaemon(scoped bool) (<-chan struct{}, error) {
 	if err := store.EnsureHome(); err != nil {
-		return err
+		return nil, err
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("resolve executable: %w", err)
+		return nil, fmt.Errorf("resolve executable: %w", err)
 	}
 	logFile, err := os.OpenFile(store.DaemonLogPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		return fmt.Errorf("open daemon log: %w", err)
+		return nil, fmt.Errorf("open daemon log: %w", err)
 	}
 	defer logFile.Close()
 
-	cmd := exec.Command(exe, "daemon")
+	var cmd *exec.Cmd
+	if scoped {
+		cmd = exec.Command("systemd-run", "--user", "--scope", "--quiet", "--collect",
+			"-p", "Delegate=yes", "--description=pm0 daemon", exe, "daemon")
+	} else {
+		cmd = exec.Command(exe, "daemon")
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdin = nil
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start daemon: %w", err)
+		return nil, fmt.Errorf("start daemon: %w", err)
 	}
 	// Do not wait: the daemon is reparented and outlives the CLI.
-	go func() { _, _ = cmd.Process.Wait() }() // reap when the CLI lingers
-	return nil
+	exited := make(chan struct{})
+	go func() { _, _ = cmd.Process.Wait(); close(exited) }() // reap when the CLI lingers
+	return exited, nil
 }
 
 // splitArgs partitions pm2-style arguments: flags may appear before or
