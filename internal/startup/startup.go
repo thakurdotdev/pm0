@@ -14,6 +14,9 @@
 //     process tree (pm2 works the same way).
 //   - ExecStop=`pm0 kill`: a polite system shutdown stops every app tree
 //     first (invariant I1), then the daemon exits.
+//   - Delegate=yes hands the unit's cgroup to User=, so the daemon it
+//     spawns can create per-app cgroups (cgroup-kill mode). Without it the
+//     cgroup stays root-owned and the daemon falls back to pgid.
 //   - PM0_HOME is pinned per user, so multiple users each get their own
 //     unit (pm0-<user>.service), same as pm2-<user>.service.
 package startup
@@ -57,6 +60,7 @@ Environment=PM0_HOME=%s
 ExecStart=%s resurrect
 ExecStop=%s kill
 RemainAfterExit=yes
+Delegate=yes
 
 [Install]
 WantedBy=multi-user.target
