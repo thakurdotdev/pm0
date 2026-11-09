@@ -42,6 +42,18 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: "go.mod"
+          # Own cache below: setup-go's key is shared by every job, so only
+          # the first job to finish saves it and the others restore a cache
+          # built for different flags.
+          cache: false
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+            ~/.cache/staticcheck
+          key: go-lint-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.sha }}
+          restore-keys: go-lint-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum') }}-
       - name: gofmt
         run: |
           out=$(gofmt -l .)
@@ -51,7 +63,12 @@ jobs:
       - name: staticcheck
         uses: dominikh/staticcheck-action@v1
         with:
-          version: latest
+          # Pinned: "latest" re-resolves and rebuilds every run. Bump on
+          # purpose. install-go: false reuses the go.mod toolchain and the
+          # build cache go vet just warmed instead of installing a second Go.
+          version: "v0.8.2"
+          install-go: false
+          use-cache: false # covered by the actions/cache step above
 
   test:
     # Daily driver: unit tests + pgid fallback under -race.
@@ -62,6 +79,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: "go.mod"
+          cache: false # own cache below (race builds differ from lint's)
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-race-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.sha }}
+          restore-keys: go-race-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum') }}-
       - uses: actions/setup-node@v4
         with:
           node-version: "23"
