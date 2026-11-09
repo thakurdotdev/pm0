@@ -53,9 +53,8 @@ type AppView struct {
 type Supervisor struct {
 	launcher *proc.Launcher
 
-	mu     sync.Mutex
-	apps   map[int]*machine.App
-	nextID int // monotonic pm_id counter (observed pm2 God.next_id)
+	mu   sync.Mutex
+	apps map[int]*machine.App
 
 	// clusterPreload is the M6 reuseport preload path; launched node
 	// cluster instances --require it. Set once by the daemon at boot.
@@ -108,7 +107,7 @@ func (s *Supervisor) assignSerialLocked(id int) uint64 {
 	return s.nextSerial
 }
 
-// StartApp validates, allocates the lowest unused pm_id, registers the
+// StartApp validates, allocates the next pm_id (highest live id + 1), registers the
 // app, and starts it. A spawn failure still REGISTERS the app (parked
 // errored — pm2 keeps bad scripts listed) and returns the error alongside
 // the id.
@@ -118,7 +117,7 @@ func (s *Supervisor) StartApp(cfg config.App) (int, error) {
 }
 
 // StartApps registers and starts a batch, allocating a CONTIGUOUS block of
-// lowest-unused pm_ids (compat.md §3.2: -i N instances take consecutive
+// pm_ids just above the highest live id (compat.md §3.2: -i N instances take consecutive
 // ids named <name>-0..<name>-N-1). fill runs for each app with the
 // allocated id BEFORE the machine is built, under the registry lock — the
 // daemon uses it to inject per-id log/pid paths without an allocate/use
@@ -132,13 +131,11 @@ func (s *Supervisor) StartApps(cfgs []config.App, fill func(cfg config.App, id i
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Monotonic allocation (observed pm2 God.next_id++): ids are handed
-	// out consecutively from a counter that never rewinds while the
-	// registry is non-empty; deleting ALL apps resets it to 0 (observed
-	// pm2 ActionMethods delete-all path). The M0 plan's "lowest unused"
-	// guess was corrected against real pm2 in M2 — see compat.md §3.2.
-	id := s.nextID
-	s.nextID += len(cfgs)
+	// Max+1 allocation: new ids continue from the highest id still
+	// registered, so deleting the newest apps frees their ids (10 apps,
+	// add 5 -> 11..15, delete those 5 -> next is 11 again). Gaps in the
+	// middle are NOT refilled, and an empty registry starts at 0.
+	id := s.maxIDLocked() + 1
 
 	ids := make([]int, 0, len(cfgs))
 	var firstErr error
@@ -194,9 +191,6 @@ func (s *Supervisor) StartReplacementAt(cfg config.App, id, prevRestarts int) er
 	}
 	s.apps[id] = app
 	s.assignSerialLocked(id)
-	if id >= s.nextID {
-		s.nextID = id + 1
-	}
 	s.bumpVersionLocked()
 	return app.Start()
 }
@@ -216,9 +210,6 @@ func (s *Supervisor) RegisterAt(cfg config.App, id int, h *proc.Handle, startedA
 	}
 	s.apps[id] = app
 	s.assignSerialLocked(id)
-	if id >= s.nextID {
-		s.nextID = id + 1
-	}
 	s.bumpVersionLocked()
 	return nil
 }
@@ -258,23 +249,30 @@ func (s *Supervisor) Delete(identifier string) error {
 		// down). Remove the entry so the id is not leaked either way.
 		delete(s.apps, id)
 		delete(s.serials, id)
-		s.resetIDIfEmptyLocked()
 		s.bumpVersionLocked()
 		return err
 	}
 	delete(s.apps, id)
 	delete(s.serials, id)
-	s.resetIDIfEmptyLocked()
 	s.bumpVersionLocked()
 	return nil
 }
 
-// resetIDIfEmptyLocked rewinds the id counter when the last app is gone —
-// observed pm2 hands out 0 again once the registry is fully empty.
-func (s *Supervisor) resetIDIfEmptyLocked() {
-	if len(s.apps) == 0 {
-		s.nextID = 0
+// maxIDLocked returns the highest pm_id in use, or -1 when the registry is
+// empty. Reload-parked slots (negative keys) count as their original id so
+// an in-flight reload's id is never handed out. Caller holds s.mu.
+func (s *Supervisor) maxIDLocked() int {
+	max := -1
+	for key := range s.apps {
+		id := key
+		if key < 0 {
+			id = -key - 1 // inverse of parkKey
+		}
+		if id > max {
+			max = id
+		}
 	}
+	return max
 }
 
 // Signal forwards sig to an app's tree (numeric pm_id or name).

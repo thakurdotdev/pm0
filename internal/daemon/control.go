@@ -345,16 +345,22 @@ func (s *Server) Save(ctx context.Context, req *v1.SaveRequest) (*v1.SaveRespons
 }
 
 // Resurrect adopts surviving trees (daemon crash recovery) or starts the
-// dump apps fresh, preserving dump pm_ids (§3.2). One broken entry never
-// aborts the batch (proto contract on ResurrectResponse).
+// dump apps fresh with renumbered pm_ids (pm2 parity: a resurrected set
+// is handed ids 0..n-1 in saved order). One broken entry never aborts the
+// batch (proto contract on ResurrectResponse).
 func (s *Server) Resurrect(ctx context.Context, req *v1.ResurrectRequest) (*v1.ResurrectResponse, error) {
 	started, errored := s.adoptOrStartFromDump()
 	return &v1.ResurrectResponse{StartedCount: int32(started), ErroredCount: int32(errored)}, nil
 }
 
 // adoptOrStartFromDump loads dump.json and, per entry: adopts the live
-// tree when one carries the attribution marker, else starts fresh at the
-// persisted pm_id. Returns (started/adopted, errored).
+// tree when one carries the attribution marker (keeping its saved pm_id —
+// the marker is id-keyed), else starts it fresh at the next free pm_id.
+// Fresh starts run in saved pm_id order after all adoptions, so on a
+// normal boot (nothing to adopt, empty registry) ids come out 0..n-1 with
+// any gaps from earlier deletes closed. Entries whose app is already
+// registered are skipped so a repeated resurrect does not duplicate.
+// Returns (started/adopted, errored).
 func (s *Server) adoptOrStartFromDump() (started, errored int) {
 	dump, ok, err := store.Load()
 	if err != nil {
@@ -365,12 +371,24 @@ func (s *Server) adoptOrStartFromDump() (started, errored int) {
 		return 0, 0
 	}
 
+	entries := append([]store.Entry(nil), dump.Apps...)
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].PMID < entries[j].PMID })
+
+	running := make(map[string]bool)
+	for _, v := range s.sup.List() {
+		running[resurrectKey(v.Config)] = true
+	}
+
 	mode := s.launch.Mode()
 	cgRoot := s.cgRoot()
-	for _, e := range dump.Apps {
+	var fresh []store.Entry
+	for _, e := range entries {
 		cfg := e.App
+		if running[resurrectKey(cfg)] {
+			fmt.Printf("pm0 daemon: resurrect %s: already running, skipped\n", cfg.Name)
+			continue
+		}
 		attrib := procAttrib(cfg.Name, e.PMID)
-
 		h, adoptErr := proc.AdoptTree(attrib, mode, cgRoot,
 			int(killSignalValue(cfg.KillSignal)), cfg.KillTimeout)
 		if adoptErr == nil {
@@ -380,20 +398,60 @@ func (s *Server) adoptOrStartFromDump() (started, errored int) {
 			}
 			if rerr := s.sup.RegisterAt(cfg, e.PMID, h, time.UnixMilli(startEpoch)); rerr == nil {
 				s.ensureRoutesFor([]int{e.PMID})
+				running[resurrectKey(cfg)] = true
 				started++
 				continue
 			}
 		}
-		// No live tree (or adoption impossible): start fresh at the same id.
-		if serr := s.sup.StartAtID(cfg, e.PMID); serr == nil {
-			s.ensureRoutesFor([]int{e.PMID})
+		fresh = append(fresh, e)
+	}
+
+	// No live tree (or adoption impossible): start fresh at the next id.
+	for _, e := range fresh {
+		cfg := clearAutoPaths(e.App, e.PMID)
+		ids, serr := s.sup.StartApps([]config.App{cfg}, fillPaths)
+		if len(ids) == 1 && ids[0] >= 0 {
+			s.ensureRoutesFor(ids)
+		}
+		if serr == nil {
 			started++
 		} else {
 			errored++
-			fmt.Printf("pm0 daemon: resurrect %s (pm_id %d): %v\n", cfg.Name, e.PMID, serr)
+			fmt.Printf("pm0 daemon: resurrect %s (saved pm_id %d): %v\n", cfg.Name, e.PMID, serr)
 		}
 	}
 	return started, errored
+}
+
+// resurrectKey identifies an app across a save/resurrect cycle: its name,
+// plus the instance index for cluster groups (whose instances share a name).
+func resurrectKey(cfg config.App) string {
+	if cfg.ExecMode == "cluster" {
+		return cfg.Name + "#" + strconv.Itoa(cfg.Instance)
+	}
+	return cfg.Name
+}
+
+// clearAutoPaths blanks log/pid paths that fillPaths derived from the OLD
+// pm_id, so a renumbered app gets paths for its new id. User-set paths
+// (anything that differs from the generated default) are kept.
+func clearAutoPaths(cfg config.App, oldID int) config.App {
+	var out, errFile, pid string
+	if cfg.ExecMode == "cluster" {
+		out, errFile, pid = store.LogPathsCluster(cfg.Name, cfg.Instance, oldID)
+	} else {
+		out, errFile, pid = store.LogPaths(cfg.Name, oldID)
+	}
+	if cfg.OutFile == out {
+		cfg.OutFile = ""
+	}
+	if cfg.ErrorFile == errFile || (cfg.MergeLogs && cfg.ErrorFile == out) {
+		cfg.ErrorFile = ""
+	}
+	if cfg.PidFile == pid {
+		cfg.PidFile = ""
+	}
+	return cfg
 }
 
 // procAttrib mirrors machine's attribution naming (sanitized name + pm id).
