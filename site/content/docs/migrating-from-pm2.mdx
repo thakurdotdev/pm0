@@ -12,7 +12,7 @@ including what pm0 cannot do yet.
 | PM2 command                     | pm0 equivalent          | Notes                                          |
 | ------------------------------- | ----------------------- | ---------------------------------------------- |
 | `pm2 start app.js`              | `pm0 start app.js`      | Same. Auto-detects the runtime.                |
-| `pm2 start app.js -i max`       | `pm0 start app.js -i max` | Cluster mode is **Node.js only** (Node ≥ 23.2). |
+| `pm2 start app.js -i max`       | `pm0 start app.js -i max` | Cluster mode supports **Node.js (≥ 23.2) and Bun**. |
 | `pm2 status` / `pm2 ls`         | `pm0 status`            | Same table shape.                              |
 | `pm2 logs <app>`                | `pm0 logs <app>`        | `--err`, `--lines N` supported.                |
 | `pm2 describe <app>`            | `pm0 describe <app>`    | Full process details.                          |

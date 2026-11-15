@@ -21,7 +21,7 @@ module.exports = {
     {
       name: "api",
       script: "./src/server.js",
-      instances: 2, // cluster mode (Node.js only)
+      instances: 2, // cluster mode (Node.js or Bun)
       exec_mode: "cluster",
       env: {
         NODE_ENV: "development",
@@ -38,9 +38,15 @@ module.exports = {
     },
     {
       name: "worker",
-      script: "./src/worker.ts", // runs under Bun (fork family)
+      script: "./src/worker.ts", // TypeScript: name the runtime
       interpreter: "bun",
       env_production: { QUEUE: "default" },
+    },
+    {
+      name: "web",
+      script: "npm", // a package.json script: the binary is the script...
+      args: "start", // ...and the script name goes in args
+      cwd: __dirname, // so npm finds THIS folder's package.json
     },
   ],
 };
@@ -54,9 +60,9 @@ module.exports = {
     script: { type: "string", description: "Entry file or prebuilt binary path.", required: true },
     args: { type: "string | string[]", description: "Arguments passed after the script.", default: "—" },
     interpreter: { type: "string", description: 'Explicit interpreter, e.g. "bun", "python3". Use "none" for prebuilt binaries.', default: "auto-detected" },
-    instances: { type: "number | 'max'", description: "Cluster workers. Cluster mode is Node.js only.", default: "1 (fork)" },
-    exec_mode: { type: '"cluster" | "fork"', description: "Cluster uses SO_REUSEPORT (Node ≥ 23.2).", default: '"fork"' },
-    cwd: { type: "string", description: "Working directory for the process.", default: "ecosystem dir" },
+    instances: { type: "number | 'max'", description: "Number of instances. Shares one port only in cluster mode (Node.js or Bun).", default: "1 (fork)" },
+    exec_mode: { type: '"cluster" | "fork"', description: "Cluster uses SO_REUSEPORT (Node ≥ 23.2 or Bun).", default: '"fork"' },
+    cwd: { type: "string", description: "Working directory for the process. Set cwd: __dirname for npm/pnpm/bun scripts.", default: "where pm0 start runs" },
     env: { type: "object", description: "Base environment variables.", default: "{}" },
     env_production: { type: "object", description: "Merged over env when using --env production.", default: "{}" },
     max_memory_restart: { type: "string", description: 'Auto-restart when RSS exceeds, e.g. "512M".', default: "off" },
@@ -67,6 +73,12 @@ module.exports = {
     only: { type: "string | string[]", description: "Restrict the start to named apps (CLI flag --only).", default: "—" },
   }}
 />
+
+`script` paths resolve relative to the ecosystem file, but `cwd` defaults to
+the directory you run `pm0 start` from (as in PM2). `__dirname` and
+`__filename` are available, so `cwd: __dirname` pins an app next to the
+file. See [Starting Your App](/docs/starting-apps) for when to use a
+package-manager script instead of a file.
 
 ## Environment layers
 

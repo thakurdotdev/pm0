@@ -9,27 +9,39 @@ This guide walks through the everyday pm0 workflow. It assumes pm0 is
 ## Start your first app
 
 Any Node entrypoint works out of the box. The `-i max` flag starts one cluster
-worker per CPU core (**cluster mode is Node.js only**):
+worker per CPU core, all sharing one port (Node.js and Bun):
 
 ```bash
-pm0 start api.js -i max
 pm0 start api.js          # single fork process
+pm0 start api.js -i max   # cluster mode
 ```
+
+<Callout type="info" title="npm start, pnpm, bun run…?">
+  To run a `package.json` script instead of a file, the program is the
+  package manager and the script goes after `--`:
+  `pm0 start npm --name api -- start`. When to choose which (and what it
+  costs) is covered in [Starting Your App](/docs/starting-apps).
+</Callout>
 
 ## Runtimes
 
-pm0 auto-detects the runtime from the script header and launches it as a fork
-family unless cluster mode is requested:
+pm0 picks the runtime from a shebang line first, then from the file
+extension (`.js/.mjs/.cjs` → node, `.py` → python3, `.sh` → sh, `.rb`,
+`.php`, `.pl`). TypeScript has no single default runtime, so name one:
 
 ```bash
-pm0 start app.js          # Node.js
-pm0 start app.ts          # Bun (bun)
-pm0 start app.tsx         # Deno
-pm0 start main.py         # Python
-pm0 start server.go       # Go (compiled first, then supervised)
-pm0 start server          # Rust/Go prebuilt binary
-pm0 start worker.sh       # shell script
+pm0 start app.js                         # Node.js (auto)
+pm0 start app.ts --interpreter bun       # Bun
+pm0 start app.ts --interpreter node      # Node ≥ 22.18 (native type stripping)
+pm0 start app.ts --interpreter deno      # Deno
+pm0 start main.py                        # Python (auto)
+pm0 start worker.sh                      # shell script (auto)
+pm0 start ./server                       # prebuilt Go/Rust binary (build it first)
 ```
+
+`pm0 start app.ts` without an interpreter (and without a shebang) is refused
+with a hint. Go sources are not compiled for you: run `go build` and start
+the binary.
 
 For a prebuilt binary where pm0 should not prepend any interpreter:
 
@@ -37,11 +49,11 @@ For a prebuilt binary where pm0 should not prepend any interpreter:
 pm0 start ./dist/server --interpreter none
 ```
 
-<Callout type="info" title="Cluster mode is Node.js only">
+<Callout type="info" title="Cluster mode: Node.js and Bun">
   `-i max` / `-i N` uses SO_REUSEPORT for kernel-level zero-downtime reloads.
-  That requires **Node ≥ 23.2** and **kernel ≥ 3.9**. Other runtimes always run
-  as fork families with no shared port — see
-  [Core Concepts](/docs/core-concepts).
+  That requires **Node ≥ 23.2** or **Bun**, and **kernel ≥ 3.9**. Other
+  runtimes (and apps started through npm/pnpm/yarn) run as fork families with
+  no shared port. See [Core Concepts](/docs/core-concepts).
 </Callout>
 
 ## Manage the app

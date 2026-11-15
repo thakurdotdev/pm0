@@ -327,6 +327,13 @@ Rolling, zero-downtime reload (one instance at a time, health-gated,
 cluster-aware). Names resolve to the whole family and are rolled in instance
 order.
 
+Zero-downtime needs the new instance to bind the port while the old one
+still holds it, which only works if the old socket was opened with
+`SO_REUSEPORT` (cluster mode, or an app that opts in, e.g. Elysia or
+`Bun.serve({ reusePort: true })`). A fork-mode app whose listening port can't
+be shared (plain `node:http`, Express, `Bun.serve` defaults, …) is restarted
+in place at the same `pm_id` instead, matching PM2's fork-mode reload.
+
 ```sh
 curl -s -X POST http://127.0.0.1:9615/api/v1/processes/web/reload
 ```

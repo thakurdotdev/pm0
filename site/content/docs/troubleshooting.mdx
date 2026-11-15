@@ -21,13 +21,18 @@ PM0_HOME=...`).
 
 ## Cluster mode refuses to start
 
-Cluster mode requires **Node ≥ 23.2** and **kernel ≥ 3.9** (SO_REUSEPORT).
-Check what pm0 sees:
+Cluster mode requires **Node ≥ 23.2** or **Bun**, and **kernel ≥ 3.9**
+(SO_REUSEPORT). Check what pm0 sees:
 
 ```bash
-node --version
+node --version   # or: bun --version
 uname -r
 ```
+
+Apps started through `npm`/`pnpm`/`yarn` can't run in cluster mode: pm0
+warns and starts a fork family whose instances collide on the port. Start
+the entry file directly, or use `bun run` (see
+[Starting Your App](/docs/starting-apps#cluster-mode-with-each-style)).
 
 On older Node lines, run fork mode instead (`pm0 start api.js` without `-i`)
 and put a reverse proxy in front for load balancing — see
@@ -35,10 +40,27 @@ and put a reverse proxy in front for load balancing — see
 
 ## "Port already in use" on reload
 
-A previous worker didn't release the port because it's not a SO_REUSEPORT
-listener (fork mode, or a non-Node runtime). Fork families don't share ports;
-either switch the app to cluster mode (Node.js only) or reload via your
-proxy's guidance — see [Zero-Downtime Deploys](/docs/guides/zero-downtime-deploys).
+pm0 checks whether a fork-mode app's ports can be shared before overlapping
+old and new instances. If they can't, it restarts the app in place instead.
+If you still see `EADDRINUSE`, another process (not managed by this app) owns
+the port: `ss -ltnp | grep :<port>`. For zero-downtime reloads use cluster
+mode (Node.js or Bun) — see
+[Zero-Downtime Deploys](/docs/guides/zero-downtime-deploys).
+
+## `pm0 start app.ts` is refused / "permission denied"
+
+TypeScript needs a runtime: `--interpreter bun`, `--interpreter node`
+(Node ≥ 22.18), `--interpreter deno`, or a shebang line. To run a
+package.json script, the program is the package manager:
+`pm0 start npm --name api -- start`, not `pm0 start "npm start"`. See
+[Starting Your App](/docs/starting-apps).
+
+## A package.json script app crash-loops right away
+
+npm/pnpm/bun read `package.json` from the app's working directory. If you
+started from another folder (or from an ecosystem file without `cwd`), the
+script isn't found. Check `pm0 describe <app>` → `cwd`, then pass
+`--cwd /path/to/project`, or set `cwd: __dirname` in the ecosystem file.
 
 ## A process restarts in a loop
 

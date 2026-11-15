@@ -28,7 +28,7 @@ $ pm0 reload api                 # rolling zero-downtime reload
 - **Standalone Daemon**: Single static Go binary; does not require Node.js for the supervisor daemon.
 - **Multi-Runtime Support**: Native execution for Node, Bun, Deno, Python, and compiled binaries.
 - **Process Reliability**: Built on Linux cgroup v2 kill paths to guarantee zero orphaned child processes.
-- **Zero-Downtime Cluster Mode (Node.js only)**: Kernel `SO_REUSEPORT` socket pooling for rolling updates without dropped connections (Node ≥ 23.2; other runtimes stay fork-mode).
+- **Zero-Downtime Cluster Mode (Node.js & Bun)**: Kernel `SO_REUSEPORT` socket pooling for rolling updates without dropped connections (Node ≥ 23.2 or Bun; `Bun.serve`, `export default { fetch }`, `node:http` and `node:net` servers all share the port; other runtimes stay fork-mode).
 - **Built-in Log Rotation**: Memory-bounded ring buffers with automatic size-based rotation.
 
 ---
@@ -72,8 +72,14 @@ sudo curl -fsSL https://github.com/thakurdotdev/pm0/releases/latest/download/pm0
 pm0 start server.js --name web               # Single instance (fork mode)
 pm0 start server.js -i max                   # Cluster mode (1 worker per CPU, shared port)
 
-# Bun
+# Bun (TypeScript always needs an explicit runtime)
 pm0 start server.ts --interpreter bun --name bun-api
+pm0 start server.ts --interpreter bun -i max  # Bun cluster mode (shared port)
+
+# package.json scripts: the program is the package manager, the script goes after --
+pm0 start npm --name web -- start
+pm0 start npm --name web -- run serve
+pm0 start bun --name web -- run start        # ~8 MB overhead vs ~65 MB for npm
 
 # Deno
 pm0 start server.ts --interpreter deno --name deno-api
@@ -88,6 +94,28 @@ pm0 start ./my-binary --interpreter none --name go-service
 pm0 start deploy.sh --name worker            # Auto-detects sh/bash
 ```
 
+### File or `npm start`?
+
+Start the **file** when you can (`pm0 start dist/index.js`,
+`pm0 start src/index.ts --interpreter bun`): no extra process, and cluster
+mode works. Go through a **package.json script** only when the script does
+real work (chained commands, framework CLIs like `next start`).
+
+| | Direct file | `bun run <script>` | `npm` / `pnpm` / `yarn` script |
+|---|---|---|---|
+| Extra RAM per app | none | ~8 MB | ~65 MB (npm) / ~135 MB (pnpm) |
+| Graceful stop/restart, logs, port detection | ✅ | ✅ | ✅ |
+| Cluster mode (`-i N`) | ✅ Node ≥ 23.2 / Bun | ✅ | ❌ |
+
+Rules that trip people up:
+
+- `<script>` is one file or binary: `pm0 start "npm run start"` doesn't work; write `pm0 start npm -- run start`.
+- pm0 flags go **before** `--`, app arguments **after** it: `pm0 start npm --name web --env PORT=3000 -- start`.
+- Always pass `--name` for package managers (otherwise the app is called `npm`).
+- Package managers read `package.json` from the working directory: run `pm0 start` in the project folder, pass `--cwd`, or set `cwd: __dirname` in an ecosystem file.
+
+Full guide: [Starting Your App](https://pm0.thakur.dev/docs/starting-apps).
+
 ### Process Management
 
 ```sh
@@ -100,6 +128,16 @@ pm0 restart web                      # Hard restart
 pm0 stop web                         # Stop process
 pm0 delete web                       # Remove process from supervision
 ```
+
+### Upgrading pm0
+
+```sh
+pm0 upgrade --check                  # is a newer release out?
+pm0 upgrade                          # download, verify SHA-256, swap the binary, reload the daemon (apps keep running)
+sudo pm0 upgrade                     # for system installs in /usr/local/bin
+```
+
+`pm0 update` is different: it only re-execs the daemon with the binary already on disk (like `pm2 update`).
 
 ### Persistence and Systemd
 
@@ -143,7 +181,7 @@ contract: [`docs/http-api.md`](docs/http-api.md).
 |---|---|---|---|
 | `--name` | `-n` | Assign an application name | `--name api` |
 | `--interpreter` | | Specify runtime binary (`bun`, `deno`, `none`) | `--interpreter bun` |
-| `--instances` | `-i` | Number of instances (`N` or `max`; Node.js apps share one port via cluster mode, other runtimes run as fork families with no shared port) | `-i max` |
+| `--instances` | `-i` | Number of instances (`N` or `max`; Node.js and Bun apps share one port via cluster mode, other runtimes run as fork families with no shared port) | `-i max` |
 | `--watch` | | Auto-restart on file changes in current directory | `--watch` |
 | `--max-memory-restart` | | Auto-restart if memory exceeds limit | `--max-memory-restart 500M` |
 | `--env` | | Inject environment variable | `--env PORT=3000` |
@@ -171,9 +209,16 @@ module.exports = {
       script: "./server.ts",
       interpreter: "bun",
       instances: 2,
+      exec_mode: "cluster",     // required in ecosystem files; both share PORT
       env: {
         PORT: 3000
       }
+    },
+    {
+      name: "web",
+      script: "npm",            // a package.json script...
+      args: "start",            // ...named in args
+      cwd: __dirname            // so npm finds this folder's package.json
     }
   ]
 };
@@ -206,7 +251,7 @@ Tested under identical workloads (2 vCPU / 3.9 GB Linux environment):
 ## Requirements
 
 - **Operating System**: Linux (uses cgroup v2 or pgid process tracking)
-- **Cluster Mode**: Node ≥ 23.2 (kernel ≥ 3.9 `SO_REUSEPORT`)
+- **Cluster Mode**: Node ≥ 23.2 or Bun (kernel ≥ 3.9 `SO_REUSEPORT`)
 - **Fork Mode**: Supports any runtime or executable (Bun, Node, Python, Go, Rust, shell)
 
 ---
