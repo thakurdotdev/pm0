@@ -4,8 +4,9 @@
 // (bounded by the I8 budget: lines + bytes), and the live follow phase is
 // a push subscription on the same route — no more 250ms file polling for
 // routed apps. Apps without a route (no sinks configured) fall back to
-// the M2 file tail. The wire contract — backlog first, live lines after,
-// out lines before err lines per app — stays identical to M2.
+// the M2 file tail. The wire contract: backlog first, live lines after;
+// backlog lines arrive in write order (stdout and stderr interleaved,
+// apps merged by arrival time) so the newest line is always last.
 //
 // Attach discipline (no gaps, no duplicates): the subscription is created
 // BEFORE the backlog snapshot; both carry the route's monotonic entry
@@ -75,40 +76,25 @@ func (s *Server) StreamLogs(req *v1.StreamLogsRequest, stream v1.Daemon_StreamLo
 	}
 	fbOffsets := make(map[offsetKey]int64) // fallback offsets seeded by the backlog phase
 
-	// Backlog phase (sequential, M2 wire shape): per app, out lines then
-	// err lines, up to n each.
+	// Backlog phase: up to n lines per stream per app, delivered in the
+	// order they were written — NOT all stdout then all stderr, which
+	// buried the latest stdout under older stderr (a chatty-erroring app
+	// showed its newest success lines halfway up the screen). Within an
+	// app the route's monotonic Seq is the arrival order across both
+	// streams; across apps (`pm0 logs` with no name) entries are merged by
+	// arrival time so the newest line of any app prints last.
 	if n > 0 {
+		var routed [][]logLineEntry
 		for i := range bounds {
 			b := &bounds[i]
 			if b.route != nil {
 				all := b.route.BacklogAll(stderrWanted)
-				var outs, errs []logbus.Entry
 				for _, e := range all {
-					if e.Stream == logbus.Stderr {
-						errs = append(errs, e)
-					} else {
-						outs = append(outs, e)
-					}
 					if e.Seq > b.maxSeq {
 						b.maxSeq = e.Seq
 					}
 				}
-				if len(outs) > n {
-					outs = outs[len(outs)-n:]
-				}
-				if stderrWanted && len(errs) > n {
-					errs = errs[len(errs)-n:]
-				}
-				for _, e := range outs {
-					if err := stream.Send(logLine(b.view, false, e.Data)); err != nil {
-						return err
-					}
-				}
-				for _, e := range errs {
-					if err := stream.Send(logLine(b.view, true, e.Data)); err != nil {
-						return err
-					}
-				}
+				routed = append(routed, backlogTail(b.view, all, n, stderrWanted))
 				continue
 			}
 			// File fallback (no sinks => no route; M2 behavior).
@@ -129,6 +115,11 @@ func (s *Server) StreamLogs(req *v1.StreamLogsRequest, stream v1.Daemon_StreamLo
 					}
 					fbOffsets[offsetKey{id: b.view.ID, stderr: true}] = off
 				}
+			}
+		}
+		for _, l := range mergeByArrival(routed) {
+			if err := stream.Send(l.line); err != nil {
+				return err
 			}
 		}
 	}
@@ -240,6 +231,67 @@ func (s *Server) StreamLogs(req *v1.StreamLogsRequest, stream v1.Daemon_StreamLo
 			}
 		}
 	}
+}
+
+// logLineEntry is one backlog line plus its arrival time (merge key).
+type logLineEntry struct {
+	line *v1.LogLine
+	at   time.Time
+}
+
+// backlogTail keeps the last n entries of each stream from one app's ring
+// snapshot (oldest first, Seq order) and returns them still in Seq order,
+// i.e. interleaved exactly as the app wrote them.
+func backlogTail(v supervisor.AppView, all []logbus.Entry, n int, stderrWanted bool) []logLineEntry {
+	var outLeft, errLeft = n, n
+	if !stderrWanted {
+		errLeft = 0
+	}
+	keep := make([]bool, len(all))
+	for i := len(all) - 1; i >= 0; i-- {
+		if all[i].Stream == logbus.Stderr {
+			if errLeft > 0 {
+				keep[i] = true
+				errLeft--
+			}
+		} else if outLeft > 0 {
+			keep[i] = true
+			outLeft--
+		}
+	}
+	out := make([]logLineEntry, 0, 2*n)
+	for i, e := range all {
+		if keep[i] {
+			out = append(out, logLineEntry{line: logLine(v, e.Stream == logbus.Stderr, e.Data), at: e.At})
+		}
+	}
+	return out
+}
+
+// mergeByArrival k-way merges per-app backlogs by arrival time. Each input
+// keeps its own order (Seq, never re-sorted: two lines from one poll share
+// a timestamp); ties across apps go to the earlier app in selector order.
+func mergeByArrival(apps [][]logLineEntry) []logLineEntry {
+	total := 0
+	for _, a := range apps {
+		total += len(a)
+	}
+	out := make([]logLineEntry, 0, total)
+	heads := make([]int, len(apps))
+	for len(out) < total {
+		best := -1
+		for i, a := range apps {
+			if heads[i] >= len(a) {
+				continue
+			}
+			if best < 0 || a[heads[i]].at.Before(apps[best][heads[best]].at) {
+				best = i
+			}
+		}
+		out = append(out, apps[best][heads[best]])
+		heads[best]++
+	}
+	return out
 }
 
 func logLine(v supervisor.AppView, stderr bool, data string) *v1.LogLine {

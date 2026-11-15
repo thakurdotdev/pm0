@@ -64,9 +64,9 @@ func cmdStart(args []string) {
 	fs := newFlagSet("start")
 	name := fs.String("name", "", "app name (default: script basename)")
 	fs.StringVar(name, "n", "", "alias of --name (pm2 shorthand)")
-	instances := fs.String("i", "", "instance count: N, or 'max' (= CPU count); node apps run in cluster mode (shared port), others fork as <name>-0..<N-1>")
+	instances := fs.String("i", "", "instance count: N, or 'max' (= CPU count); node/bun apps run in cluster mode (shared port), others fork as <name>-0..<N-1>")
 	fs.StringVar(instances, "instances", "", "alias of -i")
-	execMode := fs.String("exec-mode", "", "fork | cluster (cluster needs a node interpreter; -i implies cluster for node apps)")
+	execMode := fs.String("exec-mode", "", "fork | cluster (cluster needs a node or bun runtime; -i implies cluster for node/bun apps)")
 	interpreter := fs.String("interpreter", "", "interpreter binary, \"none\" for direct exec, empty = auto")
 	interpArgs := fs.String("interpreter-args", "", "comma-separated interpreter args")
 	fs.StringVar(interpArgs, "node-args", "", "alias of --interpreter-args (row 5)")
@@ -167,14 +167,14 @@ func cmdStart(args []string) {
 	if mode != "" && mode != "fork" && mode != "cluster" {
 		fatalf("start: --exec-mode must be fork or cluster, got %q", *execMode)
 	}
-	if mode == "" && instCount > 0 && looksLikeNode(script, *interpreter) {
+	if mode == "" && instCount > 0 && clusterCapable(script, *interpreter) {
 		mode = "cluster"
 	}
-	if instCount > 1 && mode != "cluster" && !looksLikeNode(script, *interpreter) {
-		// Cluster is Node.js-only (SO_REUSEPORT preload patches
-		// net.Server.listen): non-node -i stays a fork family with no
-		// shared port, so say so instead of letting binds collide.
-		fmt.Fprintf(os.Stderr, "[pm0] warning: -i %d with a non-node app stays fork-mode (no shared port; cluster is Node.js-only)\n", instCount)
+	if instCount > 1 && mode != "cluster" && !clusterCapable(script, *interpreter) {
+		// Cluster needs the node/bun SO_REUSEPORT preload: any other
+		// runtime with -i stays a fork family with no shared port, so say
+		// so instead of letting binds collide.
+		fmt.Fprintf(os.Stderr, "[pm0] warning: -i %d with a non-node/bun app stays fork-mode (no shared port; cluster supports Node.js and Bun)\n", instCount)
 	}
 
 	spec := &v1.ProcessSpec{
@@ -331,15 +331,29 @@ func cmdSelector(args []string, kind string) {
 	fmt.Printf("[pm0] %s done in %s\n", kind, formatElapsed(elapsed))
 }
 
-// looksLikeNode is the CLI-side heuristic for `-i` mode selection: node
-// scripts (explicit node interpreter, or an auto-detected js/mjs/cjs/ts
-// extension) go to cluster mode; everything else stays fork. The daemon
-// re-checks strictly at WithResolvedExec — this only picks the DEFAULT.
-func looksLikeNode(script, interpreter string) bool {
-	switch strings.ToLower(strings.TrimSpace(interpreter)) {
-	case "node":
+// clusterCapable is the CLI-side heuristic for `-i` mode selection: node
+// and bun apps (explicit node/bun interpreter, the node/bun binary itself
+// as the script — `pm0 start bun -i 2 -- run src/index.ts` — or an
+// auto-detected js/mjs/cjs/ts extension) go to cluster mode; everything
+// else stays fork. The daemon re-checks strictly at WithResolvedExec —
+// this only picks the DEFAULT.
+func clusterCapable(script, interpreter string) bool {
+	runtimeBinary := func() bool {
+		switch strings.ToLower(filepath.Base(script)) {
+		case "node", "nodejs", "bun":
+			return true
+		}
+		return false
+	}
+	switch strings.ToLower(filepath.Base(strings.TrimSpace(interpreter))) {
+	case "node", "nodejs", "bun":
 		return true
-	case "":
+	case "none": // direct exec: only when the script IS the runtime binary
+		return runtimeBinary()
+	case ".", "":
+		if runtimeBinary() {
+			return true
+		}
 		switch strings.ToLower(filepath.Ext(script)) {
 		case ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts":
 			return true
@@ -711,6 +725,16 @@ func cmdUpdate(args []string) {
 		os.Exit(2)
 	}
 	c := mustDial()
+	if _, err := reloadDaemonInPlace(c); err != nil {
+		fatalf("update: %v", err)
+	}
+}
+
+// reloadDaemonInPlace saves and re-execs the daemon from its own binary
+// path (apps keep running and are re-adopted), then waits for it to answer
+// again and returns the version it now reports. Shared by `update` and
+// `upgrade` (which swaps the binary first).
+func reloadDaemonInPlace(c *client.Client) (string, error) {
 	oldPid := mustPing(c)
 	fmt.Printf("[pm0] updating daemon (pid %d): saving and re-execing\n", oldPid)
 	if err := c.Update(); err != nil {
@@ -723,12 +747,12 @@ func cmdUpdate(args []string) {
 			if p, perr := c2.Ping(); perr == nil {
 				fmt.Printf("[pm0] daemon updated in place: new pid %d, version %s\n", p.GetPid(), p.GetVersion())
 				_ = c2.Close()
-				return
+				return p.GetVersion(), nil
 			}
 			_ = c2.Close()
 		}
 	}
-	fatalf("update: daemon did not come back within 15s")
+	return "", fmt.Errorf("daemon did not come back within 15s")
 }
 
 // cmdKill implements `pm0 kill [--force]`.

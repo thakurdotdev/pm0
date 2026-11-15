@@ -426,7 +426,14 @@ func TestConcurrentAccess(t *testing.T) {
 			default:
 			}
 			s := r.Subscribe()
-			<-s.C() // at least close arrives even if no line does
+			// Wait for a line, but never past stop: once the writer has
+			// stopped no line may ever come, and the route close that would
+			// end s.C() only runs after wg.Wait() — blocking here alone
+			// deadlocked the test until the go test timeout.
+			select {
+			case <-s.C():
+			case <-stop:
+			}
 			s.Close()
 		}
 	}()

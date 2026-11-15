@@ -1,8 +1,10 @@
 //go:build linux
 
-// Package cluster implements M6 cluster mode: N daemon-supervised node
-// children sharing one listening port via SO_REUSEPORT (kernel round-robin
-// load balancing), plus the preload that makes it happen.
+// Package cluster implements M6 cluster mode: N daemon-supervised node or
+// bun children sharing one listening port via SO_REUSEPORT (kernel
+// round-robin load balancing), plus the preload that makes it happen.
+// Bun loads the same preload via --preload and gets its own patches
+// (Bun.serve, node:net, node:http — see PreloadJS).
 //
 // Why a preload instead of PM2's design: PM2's God daemon is itself a Node
 // cluster primary (God.nodeApp -> cluster.fork), so the N instances share
@@ -50,51 +52,101 @@ const PreloadJS = `'use strict';
 // pm0 cluster-mode preload: SO_REUSEPORT for TCP listeners.
 // Cluster instances must all join the same kernel reuseport pool so the
 // port is shared and connections round-robin between instances.
-const net = require('net');
+// Loaded by node (--require) and by bun (--preload); idempotent.
+(function () {
+  if (globalThis.__pm0ClusterPreload) return;
+  globalThis.__pm0ClusterPreload = true;
+  const isBun = typeof Bun !== 'undefined';
+  const net = require('net');
 
-const NODE_MIN = '` + MinNodeVersion + `';
-function nodeAtLeast(want) {
-  const parts = String(process.versions.node || '0').split('-')[0].split('.');
-  const w = want.split('.');
-  for (let i = 0; i < 3; i++) {
-    const a = parseInt(parts[i] || '0', 10), b = parseInt(w[i] || '0', 10);
-    if (a !== b) return a > b;
+  const NODE_MIN = '` + MinNodeVersion + `';
+  function nodeAtLeast(want) {
+    const parts = String(process.versions.node || '0').split('-')[0].split('.');
+    const w = want.split('.');
+    for (let i = 0; i < 3; i++) {
+      const a = parseInt(parts[i] || '0', 10), b = parseInt(w[i] || '0', 10);
+      if (a !== b) return a > b;
+    }
+    return true;
   }
-  return true;
-}
 
-if (!nodeAtLeast(NODE_MIN)) {
-  process.stderr.write(
-    '[pm0] cluster mode: node ' + process.versions.node + ' has no reusePort ' +
-    'support (need >= ' + NODE_MIN + '); instances will not share the port\n');
-} else {
-  const origListen = net.Server.prototype.listen;
-  net.Server.prototype.listen = function (...args) {
-    if (args.length > 0 && args[0] !== null && typeof args[0] === 'object' &&
-        !Array.isArray(args[0])) {
-      if (args[0].reusePort === undefined && args[0].fd === undefined &&
-          args[0].path === undefined) {
-        args[0] = Object.assign({}, args[0], { reusePort: true });
+  function patchNetListen() {
+    const origListen = net.Server.prototype.listen;
+    net.Server.prototype.listen = function (...args) {
+      if (args.length > 0 && args[0] !== null && typeof args[0] === 'object' &&
+          !Array.isArray(args[0])) {
+        if (args[0].reusePort === undefined && args[0].fd === undefined &&
+            args[0].path === undefined) {
+          args[0] = Object.assign({}, args[0], { reusePort: true });
+        }
+        return origListen.apply(this, args);
+      }
+      // Positional form listen([port[, host[, backlog]]][, callback]).
+      // Only the numeric-port form is patched; string first args are unix
+      // socket paths and must not carry the flag.
+      if (args.length === 0 || typeof args[0] === 'number' || args[0] === undefined) {
+        const opts = { reusePort: true };
+        if (typeof args[0] === 'number') opts.port = args[0];
+        const rest = args.slice(1);
+        if (rest.length > 0 && typeof rest[0] === 'string') {
+          opts.host = rest.shift();
+        } else if (rest.length > 0 && typeof rest[0] === 'object' && rest[0] !== null) {
+          Object.assign(opts, rest.shift()); // {host} object form
+        }
+        return origListen.apply(this, [opts, ...rest]);
       }
       return origListen.apply(this, args);
+    };
+  }
+
+  if (!isBun) {
+    if (!nodeAtLeast(NODE_MIN)) {
+      process.stderr.write(
+        '[pm0] cluster mode: node ' + process.versions.node + ' has no reusePort ' +
+        'support (need >= ' + NODE_MIN + '); instances will not share the port\n');
+      return;
     }
-    // Positional form listen([port[, host[, backlog]]][, callback]).
-    // Only the numeric-port form is patched; string first args are unix
-    // socket paths and must not carry the flag.
-    if (args.length === 0 || typeof args[0] === 'number' || args[0] === undefined) {
-      const opts = { reusePort: true };
-      if (typeof args[0] === 'number') opts.port = args[0];
-      const rest = args.slice(1);
-      if (rest.length > 0 && typeof rest[0] === 'string') {
-        opts.host = rest.shift();
-      } else if (rest.length > 0 && typeof rest[0] === 'object' && rest[0] !== null) {
-        Object.assign(opts, rest.shift()); // {host} object form
+    patchNetListen();
+    return;
+  }
+
+  // Bun. Three entry points bind TCP:
+  //  1. Bun.serve (also behind "export default { fetch, port }", Elysia,
+  //     Hono): inject reusePort unless the app chose, or binds a unix path.
+  const origServe = Bun.serve;
+  Bun.serve = function serve(opts, ...rest) {
+    if (opts !== null && typeof opts === 'object' && opts.reusePort === undefined &&
+        opts.unix === undefined) {
+      try {
+        opts.reusePort = true; // in place: keeps class-instance options intact
+      } catch (_) {
+        opts = Object.assign({}, opts, { reusePort: true }); // frozen object
       }
-      return origListen.apply(this, [opts, ...rest]);
     }
-    return origListen.apply(this, args);
+    return origServe.call(this, opts, ...rest);
   };
-}
+  //  2. node:net servers: Bun honors listen({reusePort}) like node.
+  patchNetListen();
+  //  3. node:http/https (Express, Fastify, Koa on Bun): Bun's
+  //     http.Server.listen ignores reusePort and calls its internal
+  //     [kRealListen](tls, port, host, socketPath, reusePort) with false,
+  //     so force it there for TCP binds.
+  try {
+    const proto = require('http').Server.prototype;
+    const kRealListen = Object.getOwnPropertySymbols(proto)
+      .find((s) => s.description === 'kRealListen');
+    if (kRealListen && typeof proto[kRealListen] === 'function') {
+      const origReal = proto[kRealListen];
+      proto[kRealListen] = function (tls, port, host, socketPath, reusePort, ...rest) {
+        return origReal.call(this, tls, port, host, socketPath,
+          socketPath ? reusePort : true, ...rest);
+      };
+    } else {
+      process.stderr.write('[pm0] cluster mode: this bun version exposes no ' +
+        'http listen hook; node:http servers may not share the port\n');
+    }
+  } catch (_) {}
+})();
 `
 
 // WritePreload writes the preload into home (PM0_HOME) and returns its

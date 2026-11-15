@@ -34,6 +34,13 @@
 //	--alloc-mb <n>           allocate and touch n MiB, then keep living
 //	                         (max_memory_restart enforcement tests)
 //
+// Reload flags (fork-mode port overlap):
+//
+//	--listen <addr>          bind+listen TCP on addr at startup (e.g.
+//	                         127.0.0.1:4000); a bind failure exits 1 like
+//	                         a node/bun server crashing on EADDRINUSE
+//	--reuseport              set SO_REUSEPORT on the --listen socket
+//
 // Plumbing flags (identity reporting, shared by the scenarios above):
 //
 //	--report-pid <p>         write "pid starttime" to <p> at startup
@@ -46,8 +53,10 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -73,6 +82,8 @@ func main() {
 		sendReady        bool
 		sendReadyAfterMs int
 		allocMB          int
+		listenAddr       string
+		reusePort        bool
 	)
 	flag.IntVar(&exitAfterMs, "exit-after", 0, "exit after N ms (0: sleep forever)")
 	flag.IntVar(&exitCode, "exit-code", 0, "exit code for delayed exit")
@@ -89,7 +100,30 @@ func main() {
 	flag.BoolVar(&sendReady, "send-ready", false, "write node-IPC 'ready' to fd 3 at startup")
 	flag.IntVar(&sendReadyAfterMs, "send-ready-after", 0, "delay in ms before writing 'ready' (needs --send-ready)")
 	flag.IntVar(&allocMB, "alloc-mb", 0, "allocate and touch N MiB, then keep living")
+	flag.StringVar(&listenAddr, "listen", "", "bind+listen TCP on this address at startup")
+	flag.BoolVar(&reusePort, "reuseport", false, "set SO_REUSEPORT on the --listen socket")
 	flag.Parse()
+
+	if listenAddr != "" {
+		lc := net.ListenConfig{}
+		if reusePort {
+			lc.Control = func(_, _ string, c syscall.RawConn) error {
+				var serr error
+				if err := c.Control(func(fd uintptr) {
+					serr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEPORT, 1)
+				}); err != nil {
+					return err
+				}
+				return serr
+			}
+		}
+		ln, err := lc.Listen(context.Background(), "tcp", listenAddr)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "listen:", err)
+			os.Exit(1)
+		}
+		defer ln.Close()
+	}
 
 	if doSetsid {
 		// Only legal as the forked child of --setsid-child: we are not a

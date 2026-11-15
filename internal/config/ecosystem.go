@@ -73,14 +73,18 @@ func ParseEcosystemFile(path string) ([]*EcosystemApp, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ecosystem: abs %s: %w", path, err)
 	}
-	return ParseEcosystem(data, filepath.Dir(abs))
+	raw, err := evaluateExports(data, filepath.Dir(abs), abs)
+	if err != nil {
+		return nil, err
+	}
+	return appsFromExports(raw, filepath.Dir(abs))
 }
 
 // ParseEcosystem evaluates an ecosystem file body in the sandbox and maps
 // module.exports onto app configs. dir is the base for relative paths.
 // Accepted shapes: {apps: [...]} and a single app object ({script: ...}).
 func ParseEcosystem(data []byte, dir string) ([]*EcosystemApp, error) {
-	raw, err := evaluateExports(data)
+	raw, err := evaluateExports(data, dir, filepath.Join(dir, "ecosystem.config.js"))
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +132,7 @@ func appsFromExports(raw map[string]any, dir string) ([]*EcosystemApp, error) {
 // sandbox — everything else runs through the goja sandbox. The JSON-first
 // probe also sidesteps JS's leading-`{`-is-a-block rule, which would
 // otherwise reject `{"apps": ...}` as a SyntaxError.
-func evaluateExports(data []byte) (map[string]any, error) {
+func evaluateExports(data []byte, dir, file string) (map[string]any, error) {
 	trimmed := strings.TrimSpace(string(data))
 	if strings.HasPrefix(trimmed, "{") {
 		var raw map[string]any
@@ -146,6 +150,14 @@ func evaluateExports(data []byte) (map[string]any, error) {
 	}
 	if err := vm.Set("module", mod); err != nil {
 		return nil, fmt.Errorf("ecosystem: sandbox: %w", err)
+	}
+	// CommonJS module globals PM2 configs routinely use, most often
+	// `cwd: __dirname` so package-manager apps (script: "npm"/"bun") run
+	// next to their package.json no matter where `pm0 start` is invoked.
+	for k, v := range map[string]string{"__dirname": dir, "__filename": file} {
+		if err := vm.Set(k, v); err != nil {
+			return nil, fmt.Errorf("ecosystem: sandbox: %w", err)
+		}
 	}
 
 	// Time-boxed evaluation: Interrupt makes the in-flight RunString

@@ -195,6 +195,14 @@ func (s *Snapshot) AttributeTree(ti TreeInfo, marker string, orphanMarkers map[i
 		if err != nil {
 			return nil // cgroup gone (tree gone) or unreadable: nothing to sum
 		}
+		if len(procs) == 0 {
+			// Spawn window: the re-exec wrapper has not attached itself
+			// to the cgroup yet, but the leader is already running (and
+			// reported online). Count it, identity-checked like pgid mode.
+			if info, ok := s.ByPid[ti.LeaderPid]; ok && info.Starttime == ti.LeaderStart && info.State != 'Z' {
+				return []int{ti.LeaderPid}
+			}
+		}
 		return procs
 	case ModePgid:
 		pids := s.PgrpMembers(ti.LeaderPid)

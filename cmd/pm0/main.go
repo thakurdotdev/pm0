@@ -61,6 +61,8 @@ func main() {
 		cmdResurrect(args)
 	case "update":
 		cmdUpdate(args)
+	case "upgrade", "self-update":
+		cmdUpgrade(args)
 	case "kill":
 		cmdKill(args)
 	case "env":
@@ -112,6 +114,9 @@ Inspection:
 Persistence & daemon:
   save                      dump the app set to ~/.pm0/dump.json
   resurrect                 adopt/start apps from the dump
+  upgrade [--check]         download the newest release, verify it, replace
+                            this binary, reload the daemon (--version vX.Y.Z
+                            to pin, --force to reinstall)
   update                    re-exec the daemon in place (apps survive)
   kill [--force]            stop apps, unlink socket, exit daemon
   ping                      liveness probe (daemon metadata)

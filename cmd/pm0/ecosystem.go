@@ -74,8 +74,8 @@ func cmdStartEcosystem(path, only, envSelect string, extraEnv map[string]string)
 			continue
 		}
 		sp := specFromEcosystemApp(ea, envSelect, extraEnv, callerCwd)
-		if sp.GetInstances() > 1 && sp.GetExecMode() != "cluster" && !looksLikeNode(sp.GetScript(), sp.GetInterpreter()) {
-			fmt.Fprintf(os.Stderr, "[pm0] warning: %s: instances=%d with a non-node app stays fork-mode (no shared port; cluster is Node.js-only)\n", sp.GetName(), sp.GetInstances())
+		if sp.GetInstances() > 1 && sp.GetExecMode() != "cluster" && !clusterCapable(sp.GetScript(), sp.GetInterpreter()) {
+			fmt.Fprintf(os.Stderr, "[pm0] warning: %s: instances=%d with a non-node/bun app stays fork-mode (no shared port; cluster supports Node.js and Bun)\n", sp.GetName(), sp.GetInstances())
 		}
 		specs = append(specs, sp)
 	}

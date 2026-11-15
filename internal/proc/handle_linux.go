@@ -114,6 +114,19 @@ func (h *Handle) Signal(sig syscall.Signal) error {
 			}
 			return err
 		}
+		if len(procs) == 0 {
+			// Spawn race: the re-exec wrapper attaches ITSELF to the
+			// cgroup right after fork, so for the first few ms the cgroup
+			// is empty while the leader is alive. Signalling "everyone in
+			// the cgroup" then reached nobody, and a stop/restart issued
+			// right after a start waited the whole kill_timeout and ended
+			// in SIGKILL instead of a graceful exit. Signal the leader
+			// itself, behind the same starttime check as pgid mode (I6).
+			if st, err := StartTime(h.pid); err == nil && st == h.starttime {
+				return unix.Kill(h.pid, sig)
+			}
+			return nil
+		}
 		var firstErr error
 		for _, pid := range procs {
 			if err := unix.Kill(pid, sig); err != nil && firstErr == nil {

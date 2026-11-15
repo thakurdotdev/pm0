@@ -123,6 +123,11 @@ type Snapshot struct {
 // ErrNoScript is returned when an app is constructed without one.
 var ErrNoScript = errors.New("machine: app config needs a Script")
 
+// ErrRetired is returned by every command sent to an App whose actor has
+// already exited (after Delete). Without it such a send blocked forever on
+// a mailbox nobody reads.
+var ErrRetired = errors.New("machine: app was deleted")
+
 // Options tune the actor for tests. Zero value is production-ready.
 type Options struct {
 	// ID is the pm_id (supervisor allocates; §3.2). Diagnostic only here.
@@ -346,8 +351,12 @@ func (a *App) loop() {
 			case restartMsg:
 				m.reply <- a.onRestart()
 			case deleteMsg:
-				m.reply <- a.onDelete(m.gracefulIPC)
+				// Close done BEFORE replying: once Delete returns, Done()
+				// is already closed, so a caller checking Done() right
+				// after can never mistake the retired actor for a live one.
+				err := a.onDelete(m.gracefulIPC)
 				close(a.done)
+				m.reply <- err // buffered(1): never blocks
 				return
 			case signalMsg:
 				m.reply <- a.onSignal(m.sig)
@@ -581,6 +590,36 @@ func recordExitLocked(a *App, h *proc.Handle) {
 	}
 }
 
+// clusterArgv places the reuseport preload for a cluster instance launch.
+//
+//   - node: --require must come BEFORE the script, and ExecArgs is
+//     [interpreter args..., script], so it goes right before ExecArgs' last
+//     element — never among the app's own args after the script. When the
+//     node binary itself is the script (ExecArgs empty, `node app.js` in
+//     Args) node options lead, so --require goes first.
+//   - bun: --preload= is a global flag and goes first; it works for both
+//     `bun app.ts` and `bun run app.ts`.
+//
+// Any other runtime is left untouched (config rejects cluster for those).
+func clusterArgv(runtime string, execArgs, args []string, preload string) []string {
+	var out []string
+	switch runtime {
+	case "bun":
+		out = append(out, "--preload="+preload)
+		out = append(out, execArgs...)
+	case "node":
+		if n := len(execArgs); n > 0 {
+			out = append(out, execArgs[:n-1]...)
+			out = append(out, "--require", preload, execArgs[n-1])
+		} else {
+			out = append(out, "--require", preload)
+		}
+	default:
+		out = append(out, execArgs...)
+	}
+	return append(out, args...)
+}
+
 // launch spawns the process. Caller sets unstable=0 for manual paths.
 // restart_time increments on every relaunch (auto + manual) per the
 // corrected §2.2 semantics — the initial start is not a restart.
@@ -601,9 +640,8 @@ func (a *App) launch() error {
 		// M6 cluster instance: the reuseport preload rides before the
 		// script (ExecArgs = [interpArgs..., script]) and the instance
 		// index lands in the env the PM2 way (NODE_APP_INSTANCE).
-		if a.preloadPath != "" && len(argv) > 0 {
-			head := append([]string{}, argv[:len(argv)-1]...)
-			argv = append(head, "--require", a.preloadPath, argv[len(argv)-1])
+		if a.preloadPath != "" {
+			argv = clusterArgv(config.ClusterRuntime(a.cfg), a.cfg.ExecArgs, a.cfg.Args, a.preloadPath)
 		}
 		if env == nil {
 			// buildEnv returns nil when the app has no extra env and proc
@@ -613,6 +651,13 @@ func (a *App) launch() error {
 			env = os.Environ()
 		}
 		env = append(env, "NODE_APP_INSTANCE="+strconv.Itoa(a.cfg.Instance))
+		if a.preloadPath != "" && config.ClusterRuntime(a.cfg) == "bun" {
+			// `bun run <package.json script>` starts the real server as a
+			// CHILD bun the argv preload never reaches; BUN_OPTIONS is
+			// inherited by every descendant bun (the preload is idempotent,
+			// so the direct process loading it twice is harmless).
+			env = withBunPreload(env, a.preloadPath)
+		}
 	}
 	spec := proc.Spec{
 		Name:        a.attrib,
@@ -922,18 +967,33 @@ func (a *App) Done() <-chan struct{} { return a.done }
 
 // public command surface (mailbox senders) -------------------------------
 
+// post delivers m to the actor, or reports false when the actor has
+// already retired (its loop no longer reads the mailbox).
+func (a *App) post(m msg) bool {
+	select {
+	case a.mbox <- m:
+		return true
+	case <-a.done:
+		return false
+	}
+}
+
 // Start launches the app (no-op when already running). It blocks until the
 // actor processes the command.
 func (a *App) Start() error {
 	reply := make(chan error, 1)
-	a.mbox <- startMsg{reply: reply}
+	if !a.post(startMsg{reply: reply}) {
+		return ErrRetired
+	}
 	return <-reply
 }
 
 // Stop runs the kill path; no-op success when not running.
 func (a *App) Stop() error {
 	reply := make(chan error, 1)
-	a.mbox <- stopMsg{reply: reply}
+	if !a.post(stopMsg{reply: reply}) {
+		return ErrRetired
+	}
 	return <-reply
 }
 
@@ -941,14 +1001,18 @@ func (a *App) Stop() error {
 // budget.
 func (a *App) Restart() error {
 	reply := make(chan error, 1)
-	a.mbox <- restartMsg{reply: reply}
+	if !a.post(restartMsg{reply: reply}) {
+		return ErrRetired
+	}
 	return <-reply
 }
 
 // Delete stops the app and retires the actor. The App is unusable after.
 func (a *App) Delete() error {
 	reply := make(chan error, 1)
-	a.mbox <- deleteMsg{reply: reply}
+	if !a.post(deleteMsg{reply: reply}) {
+		return ErrRetired
+	}
 	return <-reply
 }
 
@@ -956,7 +1020,9 @@ func (a *App) Delete() error {
 // 'shutdown' message goes first, then the kill path.
 func (a *App) StopGraceful() error {
 	reply := make(chan error, 1)
-	a.mbox <- stopMsg{reply: reply, gracefulIPC: true}
+	if !a.post(stopMsg{reply: reply, gracefulIPC: true}) {
+		return ErrRetired
+	}
 	return <-reply
 }
 
@@ -966,7 +1032,9 @@ func (a *App) StopGraceful() error {
 // after.
 func (a *App) DeleteGraceful() error {
 	reply := make(chan error, 1)
-	a.mbox <- deleteMsg{reply: reply, gracefulIPC: true}
+	if !a.post(deleteMsg{reply: reply, gracefulIPC: true}) {
+		return ErrRetired
+	}
 	return <-reply
 }
 
@@ -974,7 +1042,9 @@ func (a *App) DeleteGraceful() error {
 // leader's starttime — invariant I6).
 func (a *App) Signal(sig syscall.Signal) error {
 	reply := make(chan error, 1)
-	a.mbox <- signalMsg{sig: sig, reply: reply}
+	if !a.post(signalMsg{sig: sig, reply: reply}) {
+		return ErrRetired
+	}
 	return <-reply
 }
 
@@ -984,7 +1054,9 @@ func (a *App) Signal(sig syscall.Signal) error {
 // stays actor-owned.
 func (a *App) TreePids() []int {
 	reply := make(chan []int, 1)
-	a.mbox <- treeMsg{reply: reply}
+	if !a.post(treeMsg{reply: reply}) {
+		return nil
+	}
 	return <-reply
 }
 
@@ -993,7 +1065,9 @@ func (a *App) TreePids() []int {
 // pm2_env.env on the next snapshot). Runs on the actor.
 func (a *App) UpdateEnv(env map[string]string) error {
 	reply := make(chan error, 1)
-	a.mbox <- updateEnvMsg{env: env, reply: reply}
+	if !a.post(updateEnvMsg{env: env, reply: reply}) {
+		return ErrRetired
+	}
 	return <-reply
 }
 
@@ -1052,6 +1126,25 @@ func NextRestartDelay(cfg config.App, prev time.Duration) (time.Duration, bool) 
 // buildEnv merges cfg.Env over the parent environment. Keys are replaced
 // (never duplicated — first-match-wins getenv would keep the stale value)
 // and the merged pairs are appended sorted for deterministic child env.
+// withBunPreload returns env with --preload=<path> added to BUN_OPTIONS,
+// keeping any options the app already sets there.
+func withBunPreload(env []string, path string) []string {
+	opt := "--preload=" + path
+	out := make([]string, 0, len(env)+1)
+	existing := ""
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, "BUN_OPTIONS="); ok {
+			existing = v
+			continue
+		}
+		out = append(out, kv)
+	}
+	if existing != "" {
+		opt = existing + " " + opt
+	}
+	return append(out, "BUN_OPTIONS="+opt)
+}
+
 func buildEnv(extra map[string]string) []string {
 	if len(extra) == 0 {
 		return nil // proc falls back to os.Environ() + marker

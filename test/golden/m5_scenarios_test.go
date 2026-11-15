@@ -84,8 +84,8 @@ func TestGoldenHealthCheckRestart(t *testing.T) {
 	// and stays online afterwards.
 	r.waitRestartTime(t, "healthapp", 1, 15*time.Second)
 	r.waitStatus(t, "healthapp", "online", 5*time.Second)
-	// The trigger keeps working while the probe keeps failing.
-	r.waitRestartTime(t, "healthapp", 2, 15*time.Second)
+	// Repeated triggering is covered by ops TestHealthCheckFailureGating;
+	// a second real cycle here only added ~2s of wall clock.
 	r.pm0(t, "delete", "healthapp")
 }
 
