@@ -8,6 +8,8 @@ import (
 	"os"
 	"syscall"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 func listenTCP(t *testing.T, network, addr string, reuse bool) net.Listener {
@@ -17,7 +19,7 @@ func listenTCP(t *testing.T, network, addr string, reuse bool) net.Listener {
 		lc.Control = func(_, _ string, c syscall.RawConn) error {
 			var serr error
 			if err := c.Control(func(fd uintptr) {
-				serr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEPORT, 1)
+				serr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
 			}); err != nil {
 				return err
 			}

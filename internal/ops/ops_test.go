@@ -139,6 +139,7 @@ func TestMaxMemoryRestart(t *testing.T) {
 	r.Tick = 10 * time.Millisecond
 	r.MemInterval = 50 * time.Millisecond
 
+	synced := time.Now()
 	r.Sync([]View{
 		testView(7, func(c *config.App) { c.MaxMemoryRestart = 1000 }),
 		testView(8, func(c *config.App) { c.MaxMemoryRestart = 1000 }),
@@ -152,18 +153,21 @@ func TestMaxMemoryRestart(t *testing.T) {
 
 	// App 8 (RSS unmeasurable) must never restart.
 	time.Sleep(200 * time.Millisecond)
+	r.Stop()
 	f.mu.Lock()
-	total, bad := len(f.restarts), false
+	defer f.mu.Unlock()
 	for _, id := range f.restarts {
 		if id == 8 {
-			bad = true
+			t.Fatalf("app 8 (RSS unmeasurable) restarted: %v", f.restarts)
 		}
 	}
-	f.mu.Unlock()
-	if bad || total > 4 {
-		t.Fatalf("unexpected restarts: %v", f.restarts)
+	// App 7 stays over its limit, so it legitimately restarts once per
+	// MemInterval; a runaway is MORE than that. (A fixed cap of 4 flaked
+	// under -race on a loaded box, where this test takes longer.)
+	if limit := int(time.Since(synced)/r.MemInterval) + 1; len(f.restarts) > limit {
+		t.Fatalf("memory restarts ran away: %d in %s (limit %d): %v",
+			len(f.restarts), time.Since(synced).Round(time.Millisecond), limit, f.restarts)
 	}
-	r.Stop()
 }
 
 // Health checks (divergence 7): retries consecutive failures restart the
