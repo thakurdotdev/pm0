@@ -61,6 +61,17 @@ func ResolveInterpreter(cfg App) (execPath string, execArgs []string, effective 
 		if interp, ok := extInterpreters[ext]; ok {
 			return resolveInterpBin(interp, cfg.Script, cfg.InterpreterArgs)
 		}
+		// Sources the kernel can never exec directly: say what to do
+		// instead of failing later with a bare "permission denied".
+		switch ext {
+		case ".ts", ".tsx", ".mts", ".cts":
+			return "", nil, "", fmt.Errorf(
+				"%s is TypeScript: choose a runtime with --interpreter bun (or node >= 22.18, or deno), "+
+					"set `interpreter` in the ecosystem file, or add a shebang line", filepath.Base(cfg.Script))
+		case ".go":
+			return "", nil, "", fmt.Errorf(
+				"%s is Go source: build it first (go build -o server .) and start the binary", filepath.Base(cfg.Script))
+		}
 		// Unknown extension, no shebang: direct exec. ENOEXEC surfaces as a
 		// spawn error (parked errored) — loud, per the compat contract.
 		return "", nil, "none", nil
@@ -151,18 +162,37 @@ func WithResolvedExec(cfg App) (App, error) {
 	if err != nil {
 		return cfg, err
 	}
-	if cfg.ExecMode == "cluster" {
-		base := filepath.Base(strings.ToLower(effective))
-		if effective == "" || base != "node" {
-			return cfg, fmt.Errorf(
-				"config: exec_mode cluster requires a node interpreter, got %q",
-				effective)
-		}
-	}
 	cfg.ExecPath = execPath
 	cfg.ExecArgs = execArgs
 	cfg.Interpreter = effective
+	if cfg.ExecMode == "cluster" && ClusterRuntime(cfg) == "" {
+		return cfg, fmt.Errorf(
+			"config: exec_mode cluster requires a node or bun runtime, got %q",
+			effective)
+	}
 	return cfg, nil
+}
+
+// ClusterRuntime names the JS runtime a resolved cfg launches ("node" or
+// "bun"), or "" for anything else. It looks at the interpreter binary when
+// there is one (node app.js, bun app.ts) and at the script itself for
+// direct exec (script = the bun/node binary, e.g. `bun run src/index.ts`).
+// Cluster mode needs to know: each runtime takes its reuseport preload
+// differently (node --require before the script, bun --preload first).
+func ClusterRuntime(cfg App) string {
+	bin := cfg.ExecPath
+	if bin == "" {
+		bin = cfg.Script
+	}
+	for _, name := range []string{bin, cfg.Interpreter} {
+		switch strings.ToLower(filepath.Base(name)) {
+		case "node", "nodejs":
+			return "node"
+		case "bun":
+			return "bun"
+		}
+	}
+	return ""
 }
 
 // hasShebang reports whether the file starts with "#!".

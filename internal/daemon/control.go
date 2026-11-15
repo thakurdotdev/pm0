@@ -45,7 +45,7 @@ func (s *Server) StartProcess(ctx context.Context, req *v1.StartProcessRequest) 
 		// instance binds and every later one EADDRINUSEs (confusing
 		// partial success). Nothing is registered on this error.
 		if cfg.ExecMode == "cluster" {
-			if err := cluster.CheckNodeVersion(cfg.ExecPath); err != nil {
+			if err := checkClusterRuntime(cfg); err != nil {
 				return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("start %s: %v", cfg.Name, err))
 			}
 		}
@@ -232,7 +232,7 @@ func (s *Server) ScaleProcess(ctx context.Context, req *v1.ScaleProcessRequest) 
 			}
 			// Same fail-fast as start: scaling past 1 on old Node would
 			// just EADDRINUSE the new instances.
-			if err := cluster.CheckNodeVersion(base.ExecPath); err != nil {
+			if err := checkClusterRuntime(base); err != nil {
 				return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("scale %s: %v", name, err))
 			}
 		}
@@ -461,3 +461,17 @@ func procAttrib(name string, pmid int) string {
 
 // cgRoot exposes the launcher's cgroup root for adoption lookups.
 func (s *Server) cgRoot() string { return s.launch.CgroupRoot() }
+
+// checkClusterRuntime is the cluster fail-fast shared by start and scale:
+// Node must be new enough for listen({reusePort}); Bun has supported
+// reusePort since 1.0 and needs no probe.
+func checkClusterRuntime(cfg config.App) error {
+	if config.ClusterRuntime(cfg) != "node" {
+		return nil
+	}
+	bin := cfg.ExecPath
+	if bin == "" {
+		bin = cfg.Script // direct exec of the node binary itself
+	}
+	return cluster.CheckNodeVersion(bin)
+}

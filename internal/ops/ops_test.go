@@ -139,6 +139,7 @@ func TestMaxMemoryRestart(t *testing.T) {
 	r.Tick = 10 * time.Millisecond
 	r.MemInterval = 50 * time.Millisecond
 
+	synced := time.Now()
 	r.Sync([]View{
 		testView(7, func(c *config.App) { c.MaxMemoryRestart = 1000 }),
 		testView(8, func(c *config.App) { c.MaxMemoryRestart = 1000 }),
@@ -152,18 +153,21 @@ func TestMaxMemoryRestart(t *testing.T) {
 
 	// App 8 (RSS unmeasurable) must never restart.
 	time.Sleep(200 * time.Millisecond)
+	r.Stop()
 	f.mu.Lock()
-	total, bad := len(f.restarts), false
+	defer f.mu.Unlock()
 	for _, id := range f.restarts {
 		if id == 8 {
-			bad = true
+			t.Fatalf("app 8 (RSS unmeasurable) restarted: %v", f.restarts)
 		}
 	}
-	f.mu.Unlock()
-	if bad || total > 4 {
-		t.Fatalf("unexpected restarts: %v", f.restarts)
+	// App 7 stays over its limit, so it legitimately restarts once per
+	// MemInterval; a runaway is MORE than that. (A fixed cap of 4 flaked
+	// under -race on a loaded box, where this test takes longer.)
+	if limit := int(time.Since(synced)/r.MemInterval) + 1; len(f.restarts) > limit {
+		t.Fatalf("memory restarts ran away: %d in %s (limit %d): %v",
+			len(f.restarts), time.Since(synced).Round(time.Millisecond), limit, f.restarts)
 	}
-	r.Stop()
 }
 
 // Health checks (divergence 7): retries consecutive failures restart the
@@ -188,6 +192,11 @@ func TestHealthCheckFailureGating(t *testing.T) {
 	if f.restartCount() > 3 {
 		t.Fatalf("health restarts ran away: %d", f.restartCount())
 	}
+	// The trigger keeps working while the probe keeps failing (the
+	// failure counter resets after each restart, it does not latch).
+	waitFor(t, 3*time.Second, "second health restart", func() bool {
+		return f.restartCount() >= 2
+	})
 	r.Stop()
 }
 
@@ -383,6 +392,16 @@ func TestSyncRetiresStaleRunnerOnIDReuse(t *testing.T) {
 	r := newTestReconciler(f)
 	r.Tick = 10 * time.Millisecond
 	r.MemInterval = 30 * time.Millisecond
+	// A clock that keeps moving in real time (so a stale memory runner
+	// would keep firing every MemInterval) but can be jumped forward to
+	// cross the cron minute instead of waiting up to 60s of wall clock.
+	var mu sync.Mutex
+	base, start, jump := time.Date(2026, 5, 1, 12, 0, 30, 0, time.UTC), time.Now(), time.Duration(0)
+	r.Now = func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return base.Add(time.Since(start) + jump)
+	}
 
 	// First incarnation: pm_id 0, memory trigger.
 	r.Sync([]View{{ID: 0, Serial: 1, Cfg: testView(0, func(c *config.App) { c.MaxMemoryRestart = 1000 }).Cfg}})
@@ -405,20 +424,10 @@ func TestSyncRetiresStaleRunnerOnIDReuse(t *testing.T) {
 	if rn == nil || rn.serial != 2 {
 		t.Fatalf("successor runner missing or stale (serial mismatch)")
 	}
-	// Drive the clock: the reconciler's Now is time.Now by default — swap in
-	// a mutable one is not possible post-hoc here; instead wait for the real
-	// next minute (bounded by the cron slot).
-	deadline := time.Now().Add(70 * time.Second)
-	fired := false
-	for time.Now().Before(deadline) {
-		if f.restartCount() >= 2 {
-			fired = true
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	if !fired {
-		t.Fatal("successor cron runner never fired after id reuse")
-	}
+	// Cross into the next minute: the successor's cron slot fires.
+	mu.Lock()
+	jump = time.Minute
+	mu.Unlock()
+	waitFor(t, 2*time.Second, "successor cron restart", func() bool { return f.restartCount() >= 2 })
 	r.Stop()
 }

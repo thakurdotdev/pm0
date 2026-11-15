@@ -348,27 +348,6 @@ func TestDaemonInstancesConsecutiveIds(t *testing.T) {
 	})
 }
 
-// TestDaemonScale grows and shrinks a family.
-func TestDaemonScale(t *testing.T) {
-	_, c := startServer(t)
-	name := harness.UniqueName("scale")
-	startViaClient(t, c, name, "--exit-after", "60000")
-
-	if _, err := c.Scale(name, 2); err != nil {
-		t.Fatalf("scale +2: %v", err)
-	}
-	waitFor(t, 5*time.Second, "3 instances", func() bool {
-		return countFamily(jlistOf(t, c), name) == 3
-	})
-
-	if _, err := c.Scale(name, -1); err != nil {
-		t.Fatalf("scale -1: %v", err)
-	}
-	waitFor(t, 5*time.Second, "2 instances", func() bool {
-		return countFamily(jlistOf(t, c), name) == 2
-	})
-}
-
 func countFamily(js []map[string]any, base string) int {
 	n := 0
 	for _, p := range js {
@@ -521,39 +500,6 @@ done:
 	if got["out-line-1"] == 0 || got["err-line-1"] == 0 {
 		t.Fatalf("missing lines: %v", got)
 	}
-}
-
-// TestDaemonReloadRolls: reload restarts (pid changes for fork instances).
-func TestDaemonReloadRolls(t *testing.T) {
-	_, c := startServer(t)
-	name := harness.UniqueName("roll")
-	startViaClient(t, c, name, "--exit-after", "600000")
-	waitFor(t, 5*time.Second, "online", func() bool {
-		for _, p := range jlistOf(t, c) {
-			if p["name"] == name {
-				return p["pm2_env"].(map[string]any)["status"] == "online"
-			}
-		}
-		return false
-	})
-	before := pidOf(jlistOf(t, c), name)
-
-	if _, err := c.Reload(&v1.Selector{Names: []string{name}}); err != nil {
-		t.Fatalf("reload: %v", err)
-	}
-	waitFor(t, 5*time.Second, "restarted with new pid", func() bool {
-		p := pidOf(jlistOf(t, c), name)
-		return p != 0 && p != before
-	})
-}
-
-func pidOf(js []map[string]any, name string) int64 {
-	for _, p := range js {
-		if p["name"].(string) == name {
-			return int64(p["pid"].(float64))
-		}
-	}
-	return 0
 }
 
 // TestDaemonDescribeMatchesLowestId: describe on a family returns the

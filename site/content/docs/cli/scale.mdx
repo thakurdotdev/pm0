@@ -29,9 +29,10 @@ pm0 scale api -1      # relative
 
 ## Notes
 
-- **Cluster mode is Node.js only** (Node ≥ 23.2, kernel ≥ 3.9). Fork-family
-  processes cannot share a port, so `scale` on a fork process reports a
-  usage error.
+- **Cluster mode supports Node.js (≥ 23.2) and Bun** (kernel ≥ 3.9). On a
+  fork family, `scale` adds or removes `<name>-N` instances, which do not
+  share a port. Use it for workers that don't listen, or put a proxy in
+  front of instances that each bind their own port.
 - Scaling is always sequential per worker — it uses the same safe swap as
   `reload`, never `--parallel`.
 

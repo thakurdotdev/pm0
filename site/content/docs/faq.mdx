@@ -13,12 +13,23 @@ description: Frequently asked questions about pm0 — compatibility, cluster mod
     that pm0 does not cover yet.
   </Accordion>
 
-  <Accordion title="Why is cluster mode 'Node.js only'?">
-    pm0's zero-downtime reload binds all workers to one shared socket using
-    the kernel's SO_REUSEPORT option, which Node exposes from version 23.2
-    (kernel ≥ 3.9). Other runtimes don't expose the same primitive in a way
-    pm0 can rely on, so they run as fork families with no shared port — and
-    pm0 says so instead of pretending otherwise.
+  <Accordion title="Which runtimes support cluster mode?">
+    Node.js (≥ 23.2) and Bun. pm0's zero-downtime reload binds all workers to
+    one shared socket using the kernel's SO_REUSEPORT option (kernel ≥ 3.9);
+    pm0 injects a preload that turns it on for Node `net`/`http` servers and
+    for Bun's `Bun.serve`, `export default { fetch }`, `node:http` and
+    `node:net`. Other runtimes don't expose a hook pm0 can rely on, so they run
+    as fork families with no shared port — and pm0 says so instead of
+    pretending otherwise.
+  </Accordion>
+
+  <Accordion title="Should I run `npm start` or the file directly?">
+    The file, when you can: `pm0 start dist/index.js` (or
+    `--interpreter bun src/index.ts`). A package manager in between costs
+    ~65 MB (npm) to ~135 MB (pnpm) of RAM per app and rules out cluster mode;
+    `bun run start` costs ~8 MB and keeps cluster mode. Use a script when it
+    does real work you don't want to repeat in pm0. Details and exact
+    commands: [Starting Your App](/docs/starting-apps).
   </Accordion>
 
   <Accordion title="Is the HTTP API on by default?">

@@ -48,7 +48,7 @@ $ pm0 reload api
   node_modules.
 - **Unix socket IPC** — CLI ↔ daemon roundtrip of ~0.3 ms with no V8 warmup.
 - **Kernel-level zero-downtime reloads** — SO_REUSEPORT cluster mode
-  (**Node.js only**, Node ≥ 23.2, kernel ≥ 3.9). Other runtimes run as fork
+  (**Node.js ≥ 23.2 or Bun**, kernel ≥ 3.9). Other runtimes run as fork
   families with no shared port.
 - **cgroup v2 process tracking** — SIGINT → kill_timeout → SIGKILL through the
   actor mailbox, with zero orphaned children.
@@ -59,9 +59,9 @@ $ pm0 reload api
 
 ## Compatibility notes
 
-pm0 is honest about gaps. Zero-downtime cluster mode depends on Node.js
-SO_REUSEPORT support (Node ≥ 23.2), so it is labeled "Node.js only"
-everywhere it applies. The [HTTP API](/docs/http-api) is opt-in and has **no
+pm0 is honest about gaps. Zero-downtime cluster mode depends on SO_REUSEPORT
+support in the runtime (Node ≥ 23.2, or Bun), so other runtimes are labeled
+as fork-only everywhere it applies. The [HTTP API](/docs/http-api) is opt-in and has **no
 built-in auth** — your backend terminates authentication. For a full list of
 what PM2 has that pm0 doesn't yet, read
 [Migrating from PM2](/docs/migrating-from-pm2).

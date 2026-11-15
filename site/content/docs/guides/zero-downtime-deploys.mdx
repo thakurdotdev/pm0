@@ -8,18 +8,21 @@ running app without dropping a single connection.
 
 ## The mechanics
 
-With cluster mode (`pm0 start api.js -i max`, **Node.js only** — Node ≥ 23.2,
+With cluster mode (`pm0 start api.js -i max` or
+`pm0 start src/index.ts --interpreter bun -i max`: Node ≥ 23.2 or Bun,
 kernel ≥ 3.9), every worker shares one listening socket via **SO_REUSEPORT**.
 The kernel load-balances new connections across the live workers.
 
 A rolling `pm0 reload api` then works like this:
 
-1. Pick the first worker: stop accepting new work and send SIGINT (graceful
-   shutdown, up to `kill_timeout`).
-2. Start its replacement and **wait until the replacement is online**.
-3. Only then move to the next worker.
-4. If a replacement fails to come up, **roll back** — keep the previous
-   workers running instead of leaving the fleet half-replaced.
+1. Pick the first worker and start its **replacement next to it**. Both
+   share the port, so the old one keeps serving.
+2. Wait until the replacement has stayed online for `min_uptime`.
+3. Retire the old worker (the node-IPC `shutdown` message, then SIGINT,
+   within one `kill_timeout`), then move to the next worker.
+4. If a replacement crashes or never stabilizes, **roll back**: remove it
+   and keep the old worker serving, instead of leaving the fleet
+   half-replaced.
 
 Because at least one healthy worker is always bound to the shared socket,
 new connections never see a closed port.
@@ -43,11 +46,14 @@ pm0 reload api               # always sequential (no outage, with rollback)
 Rule of thumb: `--parallel` is for CI teardown and throwaway processes;
 `reload` is for production traffic.
 
-## Fork-family runtimes
+## Fork-mode apps
 
-Bun, Deno, Python, Go, and Rust processes run as fork families with **no
-shared port**, so a socket-level zero-downtime swap is impossible inside pm0.
-Options, in order of preference:
+A fork-mode app (any app without `-i`, Deno/Python/Go/Rust, and anything
+started through npm/pnpm/yarn) owns its port alone. Unless the app itself
+opts into `SO_REUSEPORT` (Elysia does by default), a replacement cannot
+bind next to the old process. `pm0 reload` detects this and **restarts the
+app in place** (a brief gap, the same as PM2's fork-mode reload) instead of
+failing. For a real zero-downtime swap, options in order of preference:
 
 1. Run multiple named processes behind a reverse proxy (nginx, Caddy) and
    `pm0 reload` them one at a time (`pm0 reload api-a`, then `api-b`).

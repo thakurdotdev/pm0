@@ -3,6 +3,7 @@
 package machine
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -109,5 +110,47 @@ func retireActor(a *App) {
 	case <-a.Done():
 	default:
 		_ = a.Delete()
+	}
+}
+
+// TestCommandsAfterDeleteDoNotHang: Done() is closed by the time Delete
+// returns, and any later command on the retired actor fails fast with
+// ErrRetired. Before, the actor replied first and closed done after, so a
+// cleanup that checked Done() in that gap re-sent Delete into a mailbox
+// nobody read and hung the test binary until the go test timeout.
+func TestCommandsAfterDeleteDoNotHang(t *testing.T) {
+	l := harness.NewLauncher(t)
+	a, err := New(harness.SleepConfig(harness.UniqueName("retired")), l, Options{ID: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Delete(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-a.Done():
+	default:
+		t.Fatal("Done() not closed when Delete returned")
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if err := a.Delete(); !errors.Is(err, ErrRetired) {
+			t.Errorf("second Delete = %v, want ErrRetired", err)
+		}
+		if err := a.Stop(); !errors.Is(err, ErrRetired) {
+			t.Errorf("Stop after delete = %v, want ErrRetired", err)
+		}
+		if pids := a.TreePids(); pids != nil {
+			t.Errorf("TreePids after delete = %v", pids)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("command on a retired actor blocked")
 	}
 }

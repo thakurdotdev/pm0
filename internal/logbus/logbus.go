@@ -294,8 +294,8 @@ func (r *Route) Backlog(n int, includeStderr bool) []Entry {
 }
 
 // BacklogAll returns every entry currently in the ring, oldest first,
-// filtered to the requested streams. StreamLogs splits this per stream
-// to honor the M2 wire shape (up to n lines per stream, out before err).
+// filtered to the requested streams. StreamLogs keeps up to n lines per
+// stream and replays them in this (Seq) order, streams interleaved.
 func (r *Route) BacklogAll(includeStderr bool) []Entry {
 	r.mu.Lock()
 	defer r.mu.Unlock()

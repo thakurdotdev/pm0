@@ -30,11 +30,15 @@ socket through the kernel's **SO_REUSEPORT** option: the kernel load-balances
 connections across workers, and rolling reloads swap workers with zero dropped
 connections.
 
-<Callout type="warn" title="Node.js only">
-  Cluster mode requires **Node ≥ 23.2** and **kernel ≥ 3.9**. Every other
-  runtime — Bun, Deno, Python, Go, Rust, shell — runs as a **fork family with
-  no shared port**. For those runtimes, put a load balancer or reverse proxy
-  in front if you need multi-worker traffic distribution.
+<Callout type="warn" title="Node.js and Bun only">
+  Cluster mode requires **Node ≥ 23.2** or **Bun**, and **kernel ≥ 3.9**.
+  pm0 injects a small preload that turns on `SO_REUSEPORT` for the app's
+  listeners (`net`/`http` servers, `Bun.serve`, `export default { fetch }`).
+  Every other runtime (Deno, Python, Go, Rust, shell) and apps started
+  through npm/pnpm/yarn run as a **fork family with no shared port**. For
+  those, put a load balancer or reverse proxy in front if you need
+  multi-worker traffic distribution. See
+  [Starting Your App](/docs/starting-apps#cluster-mode-with-each-style).
 </Callout>
 
 `reload` walks the workers **sequentially by design**: it kills worker 0,

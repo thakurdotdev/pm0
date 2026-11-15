@@ -26,7 +26,7 @@ pm0 jlist | jq -e '.[] | select(.name=="api" and .status=="online")'
 
 Each entry includes: `name`, `id`, `mode` (`cluster`/`fork`), `pid`,
 `uptime`, `restarts`, `status`, `cpu`, `mem`, `interpreter`, and the log
-paths. Cluster processes (Node.js only) list one entry per worker.
+paths. Cluster processes (Node.js or Bun) list one entry per worker.
 
 ## Notes
 

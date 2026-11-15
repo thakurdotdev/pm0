@@ -278,3 +278,25 @@ func TestEcosystemScriptResolutionPathBinary(t *testing.T) {
 		t.Fatalf("script = %q, want %q", apps[0].App.Script, shBin)
 	}
 }
+
+// __dirname / __filename resolve to the ecosystem file's location, so
+// `cwd: __dirname` pins package-manager apps next to their package.json.
+func TestEcosystemDirnameGlobals(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ecosystem.config.js")
+	src := `module.exports = { apps: [{ name: "api", script: "npm", args: "start", cwd: __dirname,
+  env: { CONFIG: __filename } }] };`
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	apps, err := ParseEcosystemFile(path)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := apps[0].App.Cwd; got != dir {
+		t.Fatalf("cwd = %q, want %q", got, dir)
+	}
+	if got := apps[0].App.Env["CONFIG"]; got != path {
+		t.Fatalf("__filename = %q, want %q", got, path)
+	}
+}

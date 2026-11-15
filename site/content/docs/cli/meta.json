@@ -18,6 +18,7 @@
     "unstartup",
     "jlist",
     "ping",
-    "kill"
+    "kill",
+    "upgrade"
   ]
 }

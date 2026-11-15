@@ -359,6 +359,11 @@ func fakechild(t *testing.T) string {
 
 func newRunner(t *testing.T, s scenario) *runner {
 	t.Helper()
+	// Every scenario owns its PM0_HOME (daemon, socket, dump, logs) and
+	// passes it explicitly to each pm0 invocation, so scenarios are
+	// independent and run in parallel (they are mostly waiting on child
+	// processes, not CPU).
+	t.Parallel()
 	home := t.TempDir()
 	r := &runner{name: s.name, bin: pm0Bin, home: home}
 	if s.redact {

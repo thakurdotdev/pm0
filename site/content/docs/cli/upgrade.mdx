@@ -1,0 +1,71 @@
+---
+title: pm0 upgrade
+description: Upgrade pm0 itself to the newest release in place, with checksum verification and a daemon reload that keeps your apps running.
+---
+
+Download the newest pm0 release, verify it, replace the installed binary, and
+reload the running daemon in place. **Your apps keep running**: the daemon
+re-execs itself and re-adopts them, with the same pids and no restart.
+
+## Usage
+
+```bash
+pm0 upgrade                    # install the latest release
+pm0 upgrade --check            # only tell me if a newer release exists
+pm0 upgrade --version v0.1.9   # install a specific release (allows downgrades)
+pm0 upgrade --force            # reinstall even if already on that version
+```
+
+`pm0 self-update` is an alias.
+
+## What it does
+
+1. Looks up the latest release on GitHub (or uses `--version`).
+2. Downloads `pm0-linux-<arch>` and the release's `checksums.txt`, and
+   **refuses to continue unless the SHA-256 matches**.
+3. Runs the new binary once (`version`) to make sure it starts on this
+   machine and reports the expected version.
+4. Atomically replaces the binary you ran (`rename` in the same directory),
+   so a failure at any earlier step leaves the old pm0 untouched.
+5. If a daemon is running, reloads it in place (the same as
+   [`pm0 update`](#upgrade-vs-update)) and confirms it now reports the new
+   version.
+
+## Example
+
+```text
+$ pm0 upgrade
+[pm0] upgrading 0.1.8 → 0.1.9 (pm0-linux-arm64)
+[pm0] downloaded and verified SHA-256 208acb6676e1e170…
+[pm0] installed pm0 0.1.9 at /home/me/.local/bin/pm0
+[pm0] updating daemon (pid 2271024): saving and re-execing
+[pm0] daemon updated in place: new pid 2271024, version 0.1.9
+```
+
+## Upgrade vs. update
+
+| Command       | What it changes                                                            |
+| ------------- | -------------------------------------------------------------------------- |
+| `pm0 upgrade` | Downloads a **new pm0 binary**, then reloads the daemon onto it.           |
+| `pm0 update`  | Only **re-execs the daemon** with the binary already on disk (like `pm2 update`). Use it after installing pm0 some other way. |
+
+## Notes
+
+- **System installs** (`/usr/local/bin/pm0`): run `sudo pm0 upgrade`. pm0
+  tells you when it can't write the binary's directory. When the daemon runs
+  as another user, run `pm0 update` as that user afterwards to reload it.
+- **npm installs**: `pm0 upgrade` refuses and points you to
+  `npm install -g pm0@latest`, so the npm-managed copy doesn't drift.
+- **Older versions**: `upgrade` is new. If `pm0 upgrade` says
+  "unknown command", update once with the installer
+  (`curl -fsSL https://pm0.thakur.dev/install.sh | bash`), then use
+  `pm0 upgrade` from then on.
+- `PM0_REPO` (the same variable `install.sh` uses) points it at a fork.
+
+## Exit codes
+
+| Code | Meaning                                                    |
+| ---- | ---------------------------------------------------------- |
+| 0    | Upgraded, already up to date, or `--check` finished        |
+| 1    | Lookup, download, checksum, install or daemon reload failed |
+| 2    | Usage error (bad flags)                                    |

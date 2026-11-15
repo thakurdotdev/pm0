@@ -14,23 +14,40 @@ pm0 start <script|ecosystem.config.js> [args...] [flags]
 ## Examples
 
 ```bash
-pm0 start api.js -i max                    # cluster, one worker per core (Node.js only)
+pm0 start api.js -i max                    # cluster, one worker per core (Node.js / Bun)
+pm0 start src/index.ts --interpreter bun   # TypeScript needs an explicit runtime
+pm0 start npm --name api -- start          # a package.json script (see below)
+pm0 start bun --name api -- run start      # same, via bun (~8 MB vs npm's ~65 MB)
 pm0 start worker.py                        # Python, auto-detected
 pm0 start ./dist/server --interpreter none # prebuilt binary, no interpreter
 pm0 start ecosystem.config.js --env production --only api,worker
 ```
 
+`<script>` is one file or binary name, never a quoted command line.
+Arguments for it go after `--`, and pm0's own flags go before it:
+
+```bash
+pm0 start npm --name api --env PORT=3000 -- run serve   # ✅
+pm0 start "npm run serve"                               # ❌ looked up as a file
+pm0 start npm run serve                                 # ❌ rejected: add `--`
+```
+
+[Starting Your App](/docs/starting-apps) explains when to start a file
+directly and when to go through npm/pnpm/yarn/bun.
+
 ## Flags
 
 | Flag                 | Description                                                        |
 | -------------------- | ------------------------------------------------------------------ |
-| `-i, --instances N`  | Cluster workers (`max` = one per CPU core). **Node.js only.**      |
-| `--interpreter <x>`  | Force an interpreter (`bun`, `python3`, …). `none` for binaries.   |
-| `--name <name>`      | Override the process name.                                         |
+| `-i, --instances N`  | Instances (`max` = one per CPU core). Node.js and Bun apps share one port (cluster mode); anything else runs as `<name>-0..N-1` with no shared port. |
+| `--interpreter <x>`  | Force an interpreter (`bun`, `node`, `python3`, …). `none` for binaries. Required for `.ts` files without a shebang. |
+| `--name <name>`      | Override the process name (default: script basename, so always set it for `npm`/`bun` scripts). |
+| `--cwd <dir>`        | Working directory (default: where you run `pm0 start`). Package managers read `package.json` from here. |
+| `--env KEY=VALUE`    | Extra environment variable (repeatable).                           |
 | `--env <name>`       | Apply the `env_<name>` layer from the ecosystem file.              |
 | `--only <names>`     | Start only these apps from an ecosystem file.                      |
 | `--kill-timeout <ms>`| Grace period between SIGINT and SIGKILL (default 1600).            |
-| `--max-memory <size>`| Auto-restart when RSS exceeds the cap (e.g. `512M`).               |
+| `--max-memory-restart <size>` | Auto-restart when RSS exceeds the cap (e.g. `512M`).      |
 | `--no-autorestart`   | Do not restart on unexpected exit.                                 |
 
 ## Exit codes

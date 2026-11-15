@@ -21,6 +21,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -411,11 +412,17 @@ func parkKey(id int) int { return -id - 1 }
 func (s *Supervisor) reloadOne(id int) (err error) {
 	opStart := time.Now()
 	var replStart, retireStart time.Time
+	inPlace := false
 	// Per-phase timing goes to the daemon log: the roll is a deploy-time
 	// event (never a hot path), and a slow reload is otherwise opaque
 	// (only the CLI's total is visible). gate = replacement stability,
 	// retire = ONE shared kill_timeout budget for the old incarnation.
 	defer func() {
+		if inPlace {
+			fmt.Printf("pm0 daemon: reload pm_id %d restarted in place in %s err=%v\n",
+				id, time.Since(opStart).Round(time.Millisecond), err)
+			return
+		}
 		base := replStart
 		if base.IsZero() {
 			base = opStart
@@ -429,6 +436,26 @@ func (s *Supervisor) reloadOne(id int) (err error) {
 
 	s.mu.Lock()
 	old := s.apps[id]
+	s.mu.Unlock()
+	if old == nil {
+		return ErrNotFound
+	}
+
+	// Overlap is only possible when the replacement can bind the old
+	// incarnation's ports while the old still holds them (SO_REUSEPORT:
+	// cluster preload, or an app that opts in). A plain fork-mode server
+	// would crash-loop on EADDRINUSE until listen_timeout and the reload
+	// would always roll back. Those apps get PM2's fork-mode reload
+	// semantics instead: an in-place restart at the same pm_id.
+	if held := proc.UnshareableListeners(old.TreePids()); len(held) > 0 {
+		inPlace = true
+		fmt.Printf("pm0 daemon: reload pm_id %d: %s held without SO_REUSEPORT, restarting in place\n",
+			id, listenerList(held))
+		return old.Restart()
+	}
+
+	s.mu.Lock()
+	old = s.apps[id]
 	if old == nil {
 		s.mu.Unlock()
 		return ErrNotFound
@@ -501,6 +528,14 @@ func (s *Supervisor) reloadOne(id int) (err error) {
 			return errors.Join(fmt.Errorf("replacement not stable within listen_timeout"), s.rollbackReload(id, old, replacement))
 		}
 	}
+}
+
+func listenerList(ls []proc.ListenSocket) string {
+	parts := make([]string, len(ls))
+	for i, l := range ls {
+		parts[i] = l.String()
+	}
+	return strings.Join(parts, ", ")
 }
 
 // reloadTrace writes one per-instance reload timing line to the daemon log:

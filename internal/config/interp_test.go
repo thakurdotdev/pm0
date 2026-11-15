@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -148,5 +149,29 @@ func TestWithResolvedExecPathBinary(t *testing.T) {
 	}
 	if resolved.Script != shBin {
 		t.Errorf("script = %q, want %q", resolved.Script, shBin)
+	}
+}
+
+// TypeScript/Go sources without a shebang can never be exec'd directly:
+// resolution must fail with an actionable hint, not "permission denied".
+func TestResolveInterpreterSourceHints(t *testing.T) {
+	dir := t.TempDir()
+	for file, want := range map[string]string{"app.ts": "--interpreter bun", "main.go": "go build"} {
+		p := filepath.Join(dir, file)
+		if err := os.WriteFile(p, []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, _, _, err := ResolveInterpreter(App{Script: p})
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: err = %v, want hint %q", file, err, want)
+		}
+	}
+	// A shebang still wins (direct exec), and an explicit interpreter too.
+	sheb := filepath.Join(dir, "sheb.ts")
+	if err := os.WriteFile(sheb, []byte("#!/usr/bin/env bun\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, eff, err := ResolveInterpreter(App{Script: sheb}); err != nil || eff != "none" {
+		t.Fatalf("shebang ts: eff=%q err=%v", eff, err)
 	}
 }

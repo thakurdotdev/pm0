@@ -4,7 +4,8 @@ description: Zero-downtime rolling reload with rollback — always sequential by
 ---
 
 Reload a process by swapping workers one at a time with zero dropped
-connections. **Cluster mode is Node.js only** (Node ≥ 23.2, kernel ≥ 3.9).
+connections in cluster mode (**Node.js ≥ 23.2 or Bun**, kernel ≥ 3.9). A
+fork-mode app whose port can't be shared is restarted in place instead.
 
 ## Usage
 

@@ -1,0 +1,145 @@
+---
+title: Starting Your App
+description: When to start a file directly and when to go through npm, pnpm, yarn or bun run — with the exact command for each case.
+---
+
+There are two ways to run a JavaScript or TypeScript app under pm0:
+
+- **Start the file directly**: `pm0 start dist/index.js`. pm0 runs the
+  runtime (`node`, `bun`) on your file. Nothing sits in between.
+- **Start a package.json script**: `pm0 start npm -- start`. pm0 runs the
+  package manager, and the package manager runs your script, which in turn
+  starts the app.
+
+Both are fully supported. Start with the rule of thumb, then find your case in
+the table.
+
+<Callout type="info" title="Rule of thumb">
+  **Start the file directly whenever you can.** Use a package.json script
+  only when the script does real work you don't want to repeat in pm0. For
+  example, it chains commands, sets flags, or runs a framework CLI such as
+  `next start`. If you do use a script, prefer `bun run` over `npm`/`pnpm`:
+  it costs ~8 MB instead of 65–135 MB per app.
+</Callout>
+
+## Which command do I run?
+
+| What you have                              | Command                                                     |
+| ------------------------------------------ | ----------------------------------------------------------- |
+| Built JavaScript (`dist/index.js`)         | `pm0 start dist/index.js --name api`                        |
+| TypeScript, run with Bun                   | `pm0 start src/index.ts --interpreter bun --name api`       |
+| TypeScript, run with Bun (`bun run` style) | `pm0 start bun --name api -- run src/index.ts`              |
+| TypeScript, run with Node ≥ 22.18          | `pm0 start src/index.ts --interpreter node --name api`      |
+| A `package.json` script, via npm           | `pm0 start npm --name api -- start`                         |
+| …a script not called `start`               | `pm0 start npm --name api -- run serve`                     |
+| …via pnpm / yarn                           | `pm0 start pnpm --name api -- start` (same shape for yarn)  |
+| …via bun                                   | `pm0 start bun --name api -- run start`                     |
+| Script needs extra args                    | `pm0 start bun --name web -- run start -- --port 5000`      |
+
+The two Bun forms for a `.ts` file behave identically. Pick whichever reads
+better to you.
+
+## How the command line is read
+
+```text
+pm0 start <program> [pm0 flags] -- [arguments for the program]
+```
+
+- **`<program>` is a single file or binary name.** It is not a shell
+  command line. `pm0 start "npm run start"` fails because pm0 looks for a file
+  literally named `npm run start`. Write `pm0 start npm -- run start` instead.
+- **Everything after `--` goes to the program, unchanged.** pm0's own flags
+  (`--name`, `-i`, `--env`, `--cwd`, …) must come **before** the `--`. Without
+  a `--`, extra words are rejected: `pm0 start npm start` errors and tells you
+  to add one.
+- **Always pass `--name` when starting a package manager.** Otherwise the
+  app is named after the binary and shows up as `npm`, `pnpm` or `bun` in
+  `pm0 status`.
+- **The working directory matters for scripts.** npm, pnpm and `bun run`
+  read `package.json` from the current directory, and Bun also loads `.env`
+  from it. Run `pm0 start` from the project folder, or pass
+  `--cwd /path/to/project`.
+
+## What changes when a package manager sits in between
+
+|                                        | Direct file (`node app.js`, `bun app.ts`) | `bun run <script>` | `npm` / `pnpm` / `yarn` script |
+| -------------------------------------- | ----------------------------------------- | ------------------ | ------------------------------ |
+| Extra memory per app (measured)        | none                                      | ~8 MB              | npm ~65 MB, pnpm ~135 MB       |
+| `stop` / `restart` reach your app      | ✅                                        | ✅                 | ✅                             |
+| Graceful shutdown (your SIGINT handler)| ✅                                        | ✅                 | ✅                             |
+| Port shown in `pm0 status`             | ✅                                        | ✅                 | ✅                             |
+| Cluster mode (`-i N`, one shared port) | ✅ Node ≥ 23.2 and Bun                    | ✅                 | ❌ instances collide on the port |
+| `pm0 logs`                             | ✅                                        | ✅                 | ✅ (plus the package manager's own banner lines) |
+
+Measured with node 24.18, npm 12.0, pnpm 11.24 and bun 1.4 on Linux arm64.
+pm0 signals the **whole process tree**, so `stop` and `restart` reach your
+app even through `npm → sh → node`. The cost of a wrapper is memory, plus the
+loss of cluster mode for npm/pnpm/yarn.
+
+## TypeScript needs a runtime
+
+A `.ts` file is not executable on its own. `pm0 start src/index.ts` with no
+interpreter is refused with a hint. Choose one of:
+
+```bash
+pm0 start src/index.ts --interpreter bun      # Bun
+pm0 start src/index.ts --interpreter node     # Node ≥ 22.18 strips types natively
+pm0 start src/index.ts --interpreter deno     # Deno
+```
+
+Alternatively, give the file a shebang line (for example `#!/usr/bin/env bun`)
+and make it executable; pm0 then runs it directly. In an ecosystem file, set
+`interpreter: "bun"`.
+
+Go is similar: build first (`go build -o server .`), then
+`pm0 start ./server`.
+
+## Cluster mode with each style
+
+```bash
+pm0 start dist/index.js -i max                       # ✅ Node (≥ 23.2)
+pm0 start src/index.ts --interpreter bun -i max      # ✅ Bun
+pm0 start bun --name api -i max -- run start         # ✅ Bun package script
+pm0 start npm --name api -i max -- start             # ❌ fork family, port clash
+```
+
+For cluster mode through npm or pnpm, start the entry file directly instead:
+look at what your `start` script runs and give pm0 that command. Cluster
+mode works for Node `http`/`net`, Express, Fastify, Koa, Hono, Elysia,
+`Bun.serve` and `export default { fetch }` servers.
+
+## The same thing in an ecosystem file
+
+```js
+// ecosystem.config.js
+module.exports = {
+  apps: [
+    // Direct file: script paths resolve relative to this file.
+    { name: "api", script: "./dist/index.js", instances: 2, exec_mode: "cluster" },
+    { name: "worker", script: "./src/worker.ts", interpreter: "bun" },
+
+    // package.json scripts: script is the binary, args are the rest.
+    // cwd: __dirname makes the package manager find this folder's
+    // package.json wherever you run `pm0 start` from.
+    { name: "web", script: "npm", args: "start", cwd: __dirname },
+    { name: "site", script: "bun", args: ["run", "start", "--", "--port", "5000"], cwd: __dirname },
+  ],
+};
+```
+
+<Callout type="warn" title="Set cwd for package-manager apps">
+  If `cwd` is omitted, apps run in the directory you invoked `pm0 start` from
+  (as in PM2). That's fine for `./dist/index.js`, because script paths resolve
+  relative to the ecosystem file. But `npm start` would look for
+  `package.json` in the wrong folder and the app would crash-loop. Use
+  `cwd: __dirname`.
+</Callout>
+
+## Reloads
+
+`pm0 reload` is zero-downtime when the new instance can bind the port while
+the old one still holds it. That means cluster mode, or an app that opts into
+`SO_REUSEPORT` itself (Elysia does by default). For anything else, pm0 detects
+the conflict and restarts the app in place instead. The roll still succeeds,
+with a brief gap, the same as PM2's fork-mode reload. This applies to every
+start style above.

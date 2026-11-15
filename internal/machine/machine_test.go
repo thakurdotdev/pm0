@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -518,5 +519,39 @@ func TestNewValidation(t *testing.T) {
 	}
 	if !a.Config().Treekill {
 		t.Fatal("treekill must coerce back to true (row 23: always tree-kill)")
+	}
+}
+
+func TestClusterArgv(t *testing.T) {
+	const pre = "/p/cluster-preload.js"
+	cases := []struct {
+		name, runtime  string
+		execArgs, args []string
+		want           []string
+	}{
+		{"node script", "node", []string{"app.js"}, nil, []string{"--require", pre, "app.js"}},
+		{"node interp args + app args", "node", []string{"--max-old-space-size=512", "app.js"}, []string{"--flag", "v"},
+			[]string{"--max-old-space-size=512", "--require", pre, "app.js", "--flag", "v"}},
+		{"node binary as script", "node", nil, []string{"app.js", "x"}, []string{"--require", pre, "app.js", "x"}},
+		{"bun run", "bun", nil, []string{"run", "src/index.ts"}, []string{"--preload=" + pre, "run", "src/index.ts"}},
+		{"bun interpreter", "bun", []string{"app.ts"}, []string{"a"}, []string{"--preload=" + pre, "app.ts", "a"}},
+		{"other runtime untouched", "", []string{"x"}, []string{"y"}, []string{"x", "y"}},
+	}
+	for _, tc := range cases {
+		got := clusterArgv(tc.runtime, tc.execArgs, tc.args, pre)
+		if strings.Join(got, " ") != strings.Join(tc.want, " ") {
+			t.Errorf("%s: argv = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestWithBunPreload(t *testing.T) {
+	got := withBunPreload([]string{"A=1", "BUN_OPTIONS=--smol"}, "/p.js")
+	if strings.Join(got, " ") != "A=1 BUN_OPTIONS=--smol --preload=/p.js" {
+		t.Fatalf("merge existing: %q", got)
+	}
+	got = withBunPreload([]string{"A=1"}, "/p.js")
+	if strings.Join(got, " ") != "A=1 BUN_OPTIONS=--preload=/p.js" {
+		t.Fatalf("fresh: %q", got)
 	}
 }
