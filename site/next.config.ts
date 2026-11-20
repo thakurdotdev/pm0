@@ -1,31 +1,15 @@
 import { createMDX } from "fumadocs-mdx/next";
 import type { NextConfig } from "next";
 
+// Static export: `next build` writes the whole site to out/, served straight from Nginx.
+// No runtime server, so no headers()/rewrites()/middleware. The `/docs/<slug>.md`
+// copies are written by scripts/postbuild.ts.
 const nextConfig: NextConfig = {
-  output: "standalone",
+  output: "export",
   reactStrictMode: false,
+  images: { unoptimized: true },
   typescript: {
     ignoreBuildErrors: true,
-  },
-  async headers() {
-    return [
-      {
-        // install.sh must remain text/plain at https://pm0.thakur.dev/install.sh
-        source: "/install.sh",
-        headers: [
-          { key: "Content-Type", value: "text/plain; charset=utf-8" },
-          { key: "Cache-Control", value: "public, max-age=0, must-revalidate" },
-        ],
-      },
-    ];
-  },
-  async rewrites() {
-    return [
-      {
-        source: '/docs/:slug*.md',
-        destination: '/llms.mdx/docs/:slug*/content.md',
-      },
-    ];
   },
 };
 

@@ -14,27 +14,33 @@ bun install
 bun run dev        # http://localhost:3000
 ```
 
-Production (standalone output):
+Production is a static export (`output: "export"`): `bun run build` writes the whole
+site to `out/`, which ShipYard serves straight from Nginx — no Node/Bun process.
 
 ```bash
-bun run build      # next build + copies static/public into .next/standalone
-bun run start      # serves the standalone build on :3000
+bun run build      # next build -> out/, then scripts/postbuild.ts
+bun run start      # preview out/ locally
 ```
+
+Because there is no server, GitHub data (version badge, star count, /changelog) is
+fetched at build time and refreshes on the next deploy. `scripts/postbuild.ts` writes
+the `/docs/<slug>.md` Markdown copies and the `/docs` → `/docs/introduction` redirect
+that used to be request-time rewrites.
 
 ## Scripts
 
 | Script | Purpose |
 | --- | --- |
 | `bun run dev` | Dev server on port 3000 |
-| `bun run build` | Production build (standalone) |
-| `bun run start` | Run the standalone production server |
+| `bun run build` | Static export to `out/` |
+| `bun run start` | Preview the static export |
 | `bun run lint` | ESLint |
 
 ## Structure
 
 ```
 src/app/            Routes: / (landing), /docs, /changelog, 404, sitemap, robots,
-                    opengraph-image, /api/search
+                    opengraph-image.png, /api/search (static index)
 src/components/
   landing/          hero, install-tabs, terminal (animated demo), metrics-strip,
                     bento, architecture (hand-authored SVG), benchmarks,
