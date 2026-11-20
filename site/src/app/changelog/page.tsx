@@ -5,7 +5,7 @@ import { getReleases, REPO_URL, FALLBACK_VERSION } from "@/lib/github";
 import { SiteNav } from "@/components/site/site-nav";
 import { SiteFooter } from "@/components/site/site-footer";
 
-export const revalidate = 3600;
+export const dynamic = "force-static";
 
 export const metadata = {
   title: "Changelog",

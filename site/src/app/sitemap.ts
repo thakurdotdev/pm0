@@ -1,4 +1,6 @@
 import type { MetadataRoute } from "next";
+
+export const dynamic = "force-static";
 import { source } from "@/lib/source";
 
 const SITE = "https://pm0.thakur.dev";

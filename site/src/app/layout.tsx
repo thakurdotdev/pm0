@@ -77,6 +77,7 @@ export default function RootLayout({
       </head>
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">
         <RootProvider
+          search={{ options: { type: "static" } }}
           theme={{
             attribute: "class",
             defaultTheme: "dark",
